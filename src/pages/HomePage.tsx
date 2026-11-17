@@ -7,6 +7,7 @@ import { VietnamOriginMap } from '../components/VietnamOriginMap';
 import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
 import { localizeCoffeeType, localizeJournalCategory } from '../lib/i18nHelpers';
+import { fetchJournalWithFallback, fetchProductsWithFallback, fetchPromotionsWithFallback } from '../lib/staticFallback';
 
 interface HeroSlide {
   id: string;
@@ -143,17 +144,14 @@ export const HomePage: React.FC = () => {
   const [gcProc, setGcProc] = useState('HON');
 
   useEffect(() => {
-    fetch('/api/products')
-      .then((r) => (r.ok ? r.json() : { products: [] }))
-      .then((d) => setFeaturedProducts((d.products || []).filter((p: Product) => p.category !== 'green_bean').slice(0, 4)))
+    fetchProductsWithFallback()
+      .then((list) => setFeaturedProducts(list.filter((p: Product) => p.category !== 'green_bean').slice(0, 4)))
       .catch(() => {});
-    fetch('/api/journal')
-      .then((r) => (r.ok ? r.json() : { articles: [] }))
-      .then((d) => setArticles((d.articles || []).slice(0, 3)))
+    fetchJournalWithFallback()
+      .then((list) => setArticles(list.slice(0, 3)))
       .catch(() => {});
-    fetch('/api/promotions')
-      .then((r) => (r.ok ? r.json() : { promotions: [] }))
-      .then((d) => setPromotions((d.promotions || []).slice(0, 4)))
+    fetchPromotionsWithFallback()
+      .then((list) => setPromotions(list.slice(0, 4)))
       .catch(() => {});
   }, []);
 

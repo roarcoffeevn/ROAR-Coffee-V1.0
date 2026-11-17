@@ -6,6 +6,7 @@ import { MediaImage } from '../components/MediaImage';
 import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
 import { localizeCoffeeType } from '../lib/i18nHelpers';
+import { fetchProductsWithFallback } from '../lib/staticFallback';
 
 export const GreenCoffeePage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
@@ -33,9 +34,8 @@ export const GreenCoffeePage: React.FC = () => {
     if (statusFilter !== 'all') params.set('status', statusFilter);
     if (search.trim()) params.set('search', search.trim());
 
-    fetch(`/api/products?${params.toString()}`)
-      .then((r) => r.json())
-      .then((d) => setProducts(d.products || []))
+    fetchProductsWithFallback(params)
+      .then((list) => setProducts(list))
       .finally(() => setLoading(false));
   }, [typeFilter, screenFilter, procFilter, statusFilter, search]);
 

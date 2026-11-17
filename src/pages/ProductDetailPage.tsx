@@ -7,6 +7,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
 import { getProductGallery } from '../lib/media';
 import { localizeBrewingMethod, localizeCoffeeType, localizeVariantLabel } from '../lib/i18nHelpers';
+import { fetchProductBySlugWithFallback } from '../lib/staticFallback';
 
 export const ProductDetailPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -41,9 +42,12 @@ export const ProductDetailPage: React.FC = () => {
   const fetchProduct = () => {
     if (!slug) return;
     setLoading(true);
-    fetch(`/api/products/${slug}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
+    fetchProductBySlugWithFallback(slug)
       .then((d) => {
+        if (!d) {
+          setProduct(null);
+          return;
+        }
         setProduct(d.product);
         setReviews(d.reviews || []);
         setRelated(d.related || []);

@@ -5,6 +5,7 @@ import { MediaImage } from '../components/MediaImage';
 import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
 import { localizeCoffeeType } from '../lib/i18nHelpers';
+import { fetchProductsWithFallback } from '../lib/staticFallback';
 
 interface ShopPageProps {
   defaultCategory?: 'all' | 'roasted' | 'instant' | 'green_bean';
@@ -37,9 +38,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) =
     if (search.trim()) params.set('search', search.trim());
     if (mascotFilter) params.set('mascot', mascotFilter);
 
-    fetch(`/api/products?${params.toString()}`)
-      .then((r) => r.json())
-      .then((d) => setProducts(d.products || []))
+    fetchProductsWithFallback(params)
+      .then((list) => setProducts(list))
       .finally(() => setLoading(false));
   }, [category, search, mascotFilter]);
 

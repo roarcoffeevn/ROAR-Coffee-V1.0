@@ -5,6 +5,7 @@ import { MediaImage } from '../components/MediaImage';
 import { useI18n } from '../i18n/I18nContext';
 import { useStore } from '../context/StoreContext';
 import { localizeJournalCategory } from '../lib/i18nHelpers';
+import { fetchArticleBySlugWithFallback, fetchJournalWithFallback, fetchPromotionsWithFallback } from '../lib/staticFallback';
 
 export const PromotionsPage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
@@ -13,9 +14,8 @@ export const PromotionsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/promotions')
-      .then((r) => r.json())
-      .then((d) => setPromotions(d.promotions || []))
+    fetchPromotionsWithFallback()
+      .then((list) => setPromotions(list))
       .finally(() => setLoading(false));
   }, []);
 
@@ -107,9 +107,7 @@ export const JournalPage: React.FC = () => {
     const params = new URLSearchParams();
     if (category !== 'all') params.set('category', category);
     if (search.trim()) params.set('search', search.trim());
-    fetch(`/api/journal?${params.toString()}`)
-      .then((r) => r.json())
-      .then((d) => setArticles(d.articles || []));
+    fetchJournalWithFallback(params).then((list) => setArticles(list));
   }, [category, search]);
 
   const categories = ['all', 'Coffee processing', 'Coffee varieties', 'Brewing techniques', 'Coffee knowledge', 'Coffee origins'];
@@ -190,15 +188,13 @@ export const JournalArticlePage: React.FC = () => {
 
   useEffect(() => {
     if (!slug) return;
-    fetch(`/api/journal/${slug}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) {
-          setArticle(d.article);
-          setRelated(d.related || []);
-          document.title = `${lang === 'vi' ? d.article.title_vi : d.article.title_en} | ROAR COFFEE®`;
-        }
-      });
+    fetchArticleBySlugWithFallback(slug).then((d) => {
+      if (d) {
+        setArticle(d.article);
+        setRelated(d.related || []);
+        document.title = `${lang === 'vi' ? d.article.title_vi : d.article.title_en} | ROAR COFFEE®`;
+      }
+    });
   }, [slug, lang]);
 
   useEffect(() => {

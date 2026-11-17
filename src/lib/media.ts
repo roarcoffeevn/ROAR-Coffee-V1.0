@@ -86,31 +86,82 @@ export interface ProductGallerySlide {
   captionEn: string;
 }
 
-export function getProductGallery(product: {
+export type RawGalleryItem = string | Partial<ProductGallerySlide>;
+
+export function normalizeGallerySlides(
+  raw: RawGalleryItem[] | undefined | null,
+  fallbackCaptionPrefixVi = 'Hình ảnh chi tiết sản phẩm',
+  fallbackCaptionPrefixEn = 'Product detail image'
+): ProductGallerySlide[] {
+  if (!Array.isArray(raw)) return [];
+  const result: ProductGallerySlide[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i];
+    if (typeof item === 'string') {
+      const key = item.trim();
+      if (!key) continue;
+      result.push({
+        imageKey: key,
+        captionVi: `${fallbackCaptionPrefixVi} #${result.length + 1}`,
+        captionEn: `${fallbackCaptionPrefixEn} #${result.length + 1}`,
+      });
+    } else if (item && typeof item === 'object' && typeof item.imageKey === 'string' && item.imageKey.trim()) {
+      result.push({
+        imageKey: item.imageKey.trim(),
+        captionVi: (item.captionVi || '').trim() || `${fallbackCaptionPrefixVi} #${result.length + 1}`,
+        captionEn: (item.captionEn || '').trim() || (item.captionVi || '').trim() || `${fallbackCaptionPrefixEn} #${result.length + 1}`,
+      });
+    }
+  }
+  return result;
+}
+
+export function getMainProductSlide(product: {
   image_key: string;
   category: string;
   slug: string;
-  mascot_slug?: string;
-  gallery_images?: string[];
-}): ProductGallerySlide[] {
-  const customSlides: ProductGallerySlide[] = Array.isArray(product.gallery_images)
-    ? product.gallery_images
-        .filter((g) => typeof g === 'string' && g.trim().length > 0 && g !== product.image_key)
-        .map((g, i) => ({
-          imageKey: g.trim(),
-          captionVi: `Hình ảnh sản phẩm bổ sung #${i + 1}`,
-          captionEn: `Additional product image #${i + 1}`,
-        }))
-    : [];
+  name_vi?: string;
+  name_en?: string;
+}): ProductGallerySlide {
+  if (product.slug === 'signature-reserve') {
+    return {
+      imageKey: product.image_key,
+      captionVi: product.name_vi || 'Phiên bản Signature Reserve (Báo Đen)',
+      captionEn: product.name_en || 'Signature Reserve Edition (Black Panther)',
+    };
+  }
+  if (product.slug === 'roar-espresso') {
+    return {
+      imageKey: product.image_key,
+      captionVi: 'ROAR COFFEE ESPRESSO (Mã RC-RST-ESP · Cá tính Cáo)',
+      captionEn: 'ROAR COFFEE ESPRESSO (RC-RST-ESP · Fox Edition)',
+    };
+  }
+  if (product.slug === 'roar-espresso-gold') {
+    return {
+      imageKey: product.image_key,
+      captionVi: 'ROAR COFFEE ESPRESSO GOLD (Mã RC-RST-ESG · Cá tính Đại Bàng)',
+      captionEn: 'ROAR COFFEE ESPRESSO GOLD (RC-RST-ESG · Eagle Edition)',
+    };
+  }
+  return {
+    imageKey: product.image_key,
+    captionVi: product.name_vi || 'Sản phẩm chính thức ROAR COFFEE®',
+    captionEn: product.name_en || 'Official ROAR COFFEE® Packaging',
+  };
+}
 
+export function getDefaultAdditionalGallerySlides(product: {
+  category: string;
+  slug: string;
+  mascot_slug?: string;
+}): ProductGallerySlide[] {
   const mascotKey = product.mascot_slug
     ? `mascot_${product.mascot_slug.replace('black-panther', 'panther').replace(/-/g, '_')}`
     : '';
 
   if (product.slug === 'signature-reserve') {
     return [
-      { imageKey: product.image_key, captionVi: 'Phiên bản Signature Reserve (Báo Đen)', captionEn: 'Signature Reserve Edition (Black Panther)' },
-      ...customSlides,
       { imageKey: 'hero_signature_reserve_banner', captionVi: 'Chiết xuất Espresso & lớp Crema vàng hổ phách', captionEn: 'Espresso extraction & tiger-striped crema' },
       { imageKey: 'mascot_panther', captionVi: 'Biểu tượng Báo Đen — Bản lĩnh & Sang trọng', captionEn: 'Black Panther crest — Power & Prestige' },
       { imageKey: 'product_roasting_drum_clean', captionVi: 'Quy trình rang kiểm soát nhiệt độ từng mẻ', captionEn: 'Small-batch precision drum roasting' },
@@ -120,8 +171,6 @@ export function getProductGallery(product: {
 
   if (product.slug === 'roar-espresso') {
     return [
-      { imageKey: product.image_key, captionVi: 'ROAR COFFEE ESPRESSO (Mã RC-RST-ESP · Cá tính Cáo)', captionEn: 'ROAR COFFEE ESPRESSO (RC-RST-ESP · Fox Edition)' },
-      ...customSlides,
       { imageKey: 'hero_signature_reserve_banner', captionVi: 'Chiết xuất Espresso 18g → 36g ổn định crema', captionEn: 'Dialed 18g → 36g Espresso crema extraction' },
       { imageKey: 'mascot_fox', captionVi: 'Linh vật Cáo — Thông minh, linh hoạt, sáng tạo', captionEn: 'Fox Personality — Agility & Creativity' },
       { imageKey: 'product_roasting_drum_clean', captionVi: 'Mẻ rang vừa-đậm kiểm soát độ đồng nhất', captionEn: 'Uniform Medium-Dark Espresso roast batch' },
@@ -131,8 +180,6 @@ export function getProductGallery(product: {
 
   if (product.slug === 'roar-espresso-gold') {
     return [
-      { imageKey: product.image_key, captionVi: 'ROAR COFFEE ESPRESSO GOLD (Mã RC-RST-ESG · Cá tính Đại Bàng)', captionEn: 'ROAR COFFEE ESPRESSO GOLD (RC-RST-ESG · Eagle Edition)' },
-      ...customSlides,
       { imageKey: 'product_roasting_drum_clean', captionVi: 'Hạt rang S18 chọn lọc cho chuẩn quầy Barista & HORECA', captionEn: 'S18 selected beans for Barista & HORECA bars' },
       { imageKey: 'mascot_eagle', captionVi: 'Linh vật Đại Bàng — Tầm nhìn, tham vọng, bứt phá', captionEn: 'Eagle Personality — Vision & Excellence' },
       { imageKey: 'hero_highland_harvest_banner', captionVi: 'Tuyển chọn lô CBU & Honey từ vùng cao nguyên', captionEn: 'CBU Washed & Honey highland lot selection' },
@@ -142,8 +189,6 @@ export function getProductGallery(product: {
 
   if (product.category === 'green_bean') {
     return [
-      { imageKey: product.image_key, captionVi: 'Khay phân loại nhân xanh theo cỡ sàng S14/S16/S18', captionEn: 'Green coffee grading tray by S14/S16/S18 screen' },
-      ...customSlides,
       { imageKey: 'hero_highland_harvest_banner', captionVi: 'Thu hái chín và phơi giàn chế biến Natural / Honey / CBU', captionEn: 'Ripe cherry picking & drying beds' },
       { imageKey: 'origin_central_highlands', captionVi: 'Cao nguyên bazan Việt Nam — Vùng nguyên liệu', captionEn: 'Vietnamese basalt highlands origin' },
       { imageKey: 'product_roasting_drum_clean', captionVi: 'Kiểm định mẫu thử rang (Sample Cupping)', captionEn: 'Sample roasting & cupping verification' },
@@ -152,8 +197,6 @@ export function getProductGallery(product: {
 
   if (product.category === 'instant') {
     return [
-      { imageKey: product.image_key, captionVi: 'Bộ sưu tập Hòa tan Silver & Gold', captionEn: 'Silver & Gold Instant Collection' },
-      ...customSlides,
       { imageKey: 'hero_roar_coffee', captionVi: 'Hương vị cà phê Việt đậm đà tiện lợi mỗi ngày', captionEn: 'Rich Vietnamese coffee character, effortless preparation' },
       { imageKey: 'product_brewing_ritual', captionVi: 'Cảm hứng tách cà phê sáng chuẩn gu Việt', captionEn: 'Inspired by authentic morning coffee rituals' },
       { imageKey: 'origin_central_highlands', captionVi: 'Nguồn hạt tuyển chọn từ nông hộ Tây Nguyên', captionEn: 'Highland-grown Vietnamese coffee selection' },
@@ -161,8 +204,6 @@ export function getProductGallery(product: {
   }
 
   const slides: ProductGallerySlide[] = [
-    { imageKey: product.image_key, captionVi: 'Sản phẩm chính thức ROAR COFFEE®', captionEn: 'Official ROAR COFFEE® Packaging' },
-    ...customSlides,
     { imageKey: 'product_roasting_drum_clean', captionVi: 'Hạt rang tươi mới ra lò từ trống rang thép không gỉ', captionEn: 'Freshly roasted batch from cooling drum' },
     { imageKey: 'product_brewing_ritual', captionVi: 'Chiết xuất Phin & Thưởng thức chuẩn gu Việt', captionEn: 'Authentic Phin & cupping extraction' },
     { imageKey: 'hero_signature_reserve_banner', captionVi: 'Chiết xuất Espresso đậm crema & hậu vị sâu', captionEn: 'Rich espresso crema & lasting finish' },
@@ -183,4 +224,21 @@ export function getProductGallery(product: {
   }
 
   return slides;
+}
+
+export function getProductGallery(product: {
+  image_key: string;
+  category: string;
+  slug: string;
+  mascot_slug?: string;
+  name_vi?: string;
+  name_en?: string;
+  gallery_images?: RawGalleryItem[];
+}): ProductGallerySlide[] {
+  const mainSlide = getMainProductSlide(product);
+  const customSlides = normalizeGallerySlides(product.gallery_images);
+  if (customSlides.length > 0) {
+    return [mainSlide, ...customSlides];
+  }
+  return [mainSlide, ...getDefaultAdditionalGallerySlides(product)];
 }

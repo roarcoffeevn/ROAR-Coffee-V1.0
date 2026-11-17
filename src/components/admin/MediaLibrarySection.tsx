@@ -178,7 +178,7 @@ export const MediaLibrarySection: React.FC<MediaLibrarySectionProps> = ({ mediaA
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3.5 sm:space-y-5">
       {/* Upload Dropzone */}
       <label
         onDragOver={(e) => {
@@ -191,26 +191,26 @@ export const MediaLibrarySection: React.FC<MediaLibrarySectionProps> = ({ mediaA
           setDragging(false);
           handleUploadFiles(e.dataTransfer.files);
         }}
-        className={`flex flex-col sm:flex-row items-center justify-between gap-4 border-2 border-dashed rounded-xl p-5 cursor-pointer transition-colors ${
+        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-2 border-dashed rounded-xl p-3.5 sm:p-5 cursor-pointer transition-colors ${
           dragging ? 'border-[#00552B] bg-emerald-50/70' : 'border-slate-300 bg-white hover:border-[#00552B]'
         }`}
       >
-        <div className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-lg bg-[#00552B]/10 text-[#00552B] flex items-center justify-center shrink-0">
-            <Upload className="w-5 h-5" />
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-lg bg-[#00552B]/10 text-[#00552B] flex items-center justify-center shrink-0">
+            <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-          <div>
-            <p className="text-sm font-bold text-slate-900">
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm font-bold text-slate-900">
               {uploading
                 ? t('Đang tải ảnh lên Thư viện...', 'Uploading images...')
-                : t('Tải ảnh mới lên Thư viện (hỗ trợ chọn nhiều tệp)', 'Upload New Images (multi-file supported)')}
+                : t('Tải ảnh mới lên Thư viện', 'Upload New Images')}
             </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {t('Kéo thả hình ảnh vào đây hoặc nhấn để chọn tệp PNG, JPG, WEBP, GIF (tối đa 6MB/ảnh)', 'Drag & drop or click to choose PNG, JPG, WEBP, GIF (max 6MB each)')}
+            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate sm:whitespace-normal">
+              {t('Hỗ trợ PNG, JPG, WEBP, GIF (tối đa 6MB)', 'PNG, JPG, WEBP, GIF up to 6MB')}
             </p>
           </div>
         </div>
-        <span className="px-4 py-2 rounded-lg bg-[#00552B] text-white text-xs font-semibold whitespace-nowrap shrink-0">
+        <span className="text-center px-3.5 py-2 rounded-lg bg-[#00552B] text-white text-xs font-semibold whitespace-nowrap shrink-0">
           {t('+ Chọn tệp tải lên', '+ Select Files')}
         </span>
         <input
@@ -228,18 +228,18 @@ export const MediaLibrarySection: React.FC<MediaLibrarySectionProps> = ({ mediaA
       )}
 
       {/* Filter Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2.5 bg-white p-3 rounded-xl border border-slate-200">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:pb-0">
           {[
             { id: 'all', label: `${t('Tất cả', 'All')} (${mediaAssets.length + BUILTIN_MEDIA_ITEMS.length})` },
-            { id: 'uploaded', label: `${t('Ảnh đã tải lên', 'Uploaded')} (${mediaAssets.length})` },
-            { id: 'builtin', label: `${t('Ảnh hệ thống', 'System Assets')} (${BUILTIN_MEDIA_ITEMS.length})` },
+            { id: 'uploaded', label: `${t('Đã tải lên', 'Uploaded')} (${mediaAssets.length})` },
+            { id: 'builtin', label: `${t('Hệ thống', 'System')} (${BUILTIN_MEDIA_ITEMS.length})` },
           ].map((btn) => (
             <button
               key={btn.id}
               type="button"
               onClick={() => setFilter(btn.id as any)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer ${
                 filter === btn.id ? 'bg-[#00552B] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
@@ -255,20 +255,20 @@ export const MediaLibrarySection: React.FC<MediaLibrarySectionProps> = ({ mediaA
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('Tìm theo tiêu đề hoặc đường dẫn...', 'Search media title or path...')}
-            className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-60"
+            className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-full sm:w-60"
           />
         </div>
       </div>
 
       {/* Grid + Inspector */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        <div className="lg:col-span-8 bg-white p-4 rounded-xl border border-slate-200">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-start">
+        <div className="lg:col-span-8 bg-white p-3 sm:p-4 rounded-xl border border-slate-200">
           {items.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-500">
               {t('Chưa có hình ảnh nào phù hợp với bộ lọc hiện tại.', 'No images match the current filter.')}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 sm:gap-3">
               {items.map((item) => {
                 const isSelected =
                   (selected?.kind === 'uploaded' && item.kind === 'uploaded' && selected.asset.id === item.asset.id) ||

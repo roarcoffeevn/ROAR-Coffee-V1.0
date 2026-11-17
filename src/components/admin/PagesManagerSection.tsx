@@ -129,9 +129,39 @@ export const PagesManagerSection: React.FC<PagesManagerSectionProps> = ({
   const groups = ['story', 'b2b', 'legal'];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      {/* Left Directory of Subpages */}
-      <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-4 space-y-4">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-5 items-start">
+      {/* Compact Mobile Subpage Picker */}
+      <div className="lg:hidden bg-white rounded-xl border border-slate-200 p-3 space-y-1.5 text-xs">
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor="mobile-subpage-select" className="font-bold text-slate-900">
+            {t('Chọn Trang con cần sửa (12 trang)', 'Select Storefront Subpage (12)')}
+          </label>
+          <span className="font-mono text-[11px] text-[#00552B]">{draft?.route_path}</span>
+        </div>
+        <select
+          id="mobile-subpage-select"
+          value={selectedSlug}
+          onChange={(e) => setSelectedSlug(e.target.value)}
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-slate-50 font-semibold text-slate-900"
+        >
+          {groups.map((grp) => {
+            const grpPages = pages.filter((p) => p.group_name === grp);
+            if (!grpPages.length) return null;
+            return (
+              <optgroup key={grp} label={lang === 'vi' ? GROUP_LABELS[grp]?.vi : GROUP_LABELS[grp]?.en}>
+                {grpPages.map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {lang === 'vi' ? p.title_vi : p.title_en} ({p.route_path})
+                  </option>
+                ))}
+              </optgroup>
+            );
+          })}
+        </select>
+      </div>
+
+      {/* Left Directory of Subpages (Desktop) */}
+      <div className="hidden lg:block lg:col-span-4 bg-white rounded-xl border border-slate-200 p-4 space-y-4">
         <div>
           <h2 className="text-sm font-bold text-slate-900">{t('Danh sách Trang con (12 trang)', 'Storefront Subpages (12)')}</h2>
           <p className="text-[11px] text-slate-500 mt-0.5">
@@ -181,32 +211,32 @@ export const PagesManagerSection: React.FC<PagesManagerSectionProps> = ({
 
       {/* Right Bilingual Page Editor */}
       {draft && (
-        <form onSubmit={handleSave} className="lg:col-span-8 bg-white rounded-xl border border-slate-200 p-5 sm:p-6 space-y-5 text-xs">
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
-            <div>
+        <form onSubmit={handleSave} className="lg:col-span-8 bg-white rounded-xl border border-slate-200 p-3.5 sm:p-6 space-y-4 sm:space-y-5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 sm:pb-4 border-b border-slate-200">
+            <div className="min-w-0">
               <span className="font-mono text-[11px] text-[#00552B] font-semibold">{draft.route_path}</span>
-              <h3 className="text-base font-bold text-slate-900">{lang === 'vi' ? draft.title_vi : draft.title_en}</h3>
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 truncate">{lang === 'vi' ? draft.title_vi : draft.title_en}</h3>
               {draft.updated_at && (
                 <p className="text-[11px] text-slate-400">
-                  {t('Cập nhật gần nhất:', 'Last updated:')} {draft.updated_at}
+                  {t('Cập nhật:', 'Updated:')} {draft.updated_at}
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Link
                 to={draft.route_path}
-                className="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-[#00552B] font-semibold inline-flex items-center gap-1.5"
+                className="flex-1 sm:flex-none justify-center px-3 py-1.5 sm:py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-[#00552B] font-semibold inline-flex items-center gap-1.5"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                {t('Xem trang thực tế', 'View Live Page')}
+                {t('Xem trang', 'Live Page')}
               </Link>
               <button
                 type="submit"
                 disabled={saving}
-                className="px-4 py-2 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="flex-1 sm:flex-none justify-center px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 {saving ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-                {saving ? t('Đang lưu...', 'Saving...') : t('Lưu & Xuất bản trang', 'Save & Publish Page')}
+                {saving ? t('Đang lưu...', 'Saving...') : t('Lưu & Xuất bản', 'Save & Publish')}
               </button>
             </div>
           </div>

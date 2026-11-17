@@ -18,6 +18,21 @@ import {
   verifyPassword,
 } from './server/auth.ts';
 import { db, initDatabase, logAudit } from './server/db.ts';
+import {
+  buildCmsSnapshot,
+  exportCmsSnapshotToDisk,
+  restoreFromSnapshot,
+  scheduleSnapshotSync,
+} from './server/snapshot.ts';
+import {
+  convertVndToUsdByRate,
+  getVietcombankUsdRate,
+  type VcbRateMode,
+} from './server/vietcombank.ts';
+import {
+  GeminiTranslationError,
+  translateProductViToEn,
+} from './server/gemini.ts';
 
 initDatabase();
 
@@ -527,6 +542,17 @@ app.get('/api/site-bootstrap', (_req, res) => {
   }
 
   res.json({ settings, personalities, origins, tiers, loyaltySettings, cmsPages });
+});
+
+app.get('/api/exchange-rate/vietcombank', async (req, res) => {
+  const modeParam = req.query.mode;
+  const modeOverride: VcbRateMode | undefined =
+    modeParam === 'buy' || modeParam === 'transfer' || modeParam === 'sell' ? modeParam : undefined;
+  const rate = await getVietcombankUsdRate(db, {
+    force: req.query.refresh === '1',
+    modeOverride,
+  });
+  res.json({ rate });
 });
 
 app.get('/api/pages/:slug', (req, res) => {
@@ -1209,10 +1235,11 @@ app.post('/api/admin/products', requirePermission('products'), (req: AuthedReque
     );
 
   logAudit(req.authUser!.userId, req.authUser!.email, 'CREATE_PRODUCT', 'product', Number(result.lastInsertRowid), { sku: b.sku });
+  scheduleSnapshotSync(db);
   res.status(201).json({ ok: true, id: Number(result.lastInsertRowid) });
 });
 
-app.patch('/api/admin/products/:id', requirePermission('products'), (req: AuthedRequest, res) => {
+app.patch('/api/admin/products/:id', requirePermission('products'), async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id) as any;
   if (!existing) {
@@ -1221,6 +1248,11 @@ app.patch('/api/admin/products/:id', requirePermission('products'), (req: Authed
   }
   const b = req.body || {};
   const nextSlug = b.slug ? toSafeSlug(b.slug) || existing.slug : existing.slug;
+  let resolvedPriceUsd = b.price_usd !== undefined ? Number(b.price_usd) : existing.price_usd;
+  if (b.price_vnd !== undefined && b.price_usd === undefined) {
+    const vcb = await getVietcombankUsdRate(db);
+    resolvedPriceUsd = convertVndToUsdByRate(Number(b.price_vnd), vcb.activeRate);
+  }
   db.prepare(`
     UPDATE products SET
       sku = ?, slug = ?, category = ?, sub_category = ?,
@@ -1258,7 +1290,7 @@ app.patch('/api/admin/products/:id', requirePermission('products'), (req: Authed
     b.variants !== undefined ? JSON.stringify(b.variants) : existing.variants_json,
     b.packaging_options !== undefined ? JSON.stringify(b.packaging_options) : existing.packaging_options_json,
     b.price_vnd !== undefined ? Number(b.price_vnd) : existing.price_vnd,
-    b.price_usd !== undefined ? Number(b.price_usd) : existing.price_usd,
+    resolvedPriceUsd,
     b.inventory !== undefined ? Number(b.inventory) : existing.inventory,
     b.moq ?? existing.moq,
     b.status ?? existing.status,
@@ -1277,7 +1309,8 @@ app.patch('/api/admin/products/:id', requirePermission('products'), (req: Authed
     id
   );
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_PRODUCT', 'product', id, { sku: b.sku ?? existing.sku });
-  res.json({ ok: true });
+  scheduleSnapshotSync(db);
+  res.json({ ok: true, price_usd: resolvedPriceUsd });
 });
 
 app.delete('/api/admin/products/:id', requirePermission('products'), (req: AuthedRequest, res) => {
@@ -1298,12 +1331,14 @@ app.delete('/api/admin/products/:id', requirePermission('products'), (req: Authe
   if (refs > 0 && req.query.archive === 'true') {
     db.prepare("UPDATE products SET status = 'draft' WHERE id = ?").run(id);
     logAudit(req.authUser!.userId, req.authUser!.email, 'ARCHIVE_PRODUCT', 'product', id, { sku: existing.sku });
+    scheduleSnapshotSync(db);
     res.json({ ok: true, archived: true });
     return;
   }
   db.prepare('DELETE FROM product_reviews WHERE product_id = ?').run(id);
   db.prepare('DELETE FROM products WHERE id = ?').run(id);
   logAudit(req.authUser!.userId, req.authUser!.email, 'DELETE_PRODUCT', 'product', id, { sku: existing.sku });
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1587,6 +1622,7 @@ app.patch('/api/admin/loyalty-settings', requirePermission('customers'), (req: A
     Number(maxRedeemPercent || 30)
   );
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_LOYALTY_POLICY', 'loyalty_settings', 1, req.body);
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1645,6 +1681,7 @@ app.post('/api/admin/promotions', requirePermission('promotions'), (req: AuthedR
   }
 
   logAudit(req.authUser!.userId, req.authUser!.email, 'CREATE_PROMOTION', 'promotion', Number(result.lastInsertRowid), { code: cleanCode });
+  scheduleSnapshotSync(db);
   res.status(201).json({ ok: true });
 });
 
@@ -1653,6 +1690,7 @@ app.patch('/api/admin/promotions/:id', requirePermission('promotions'), (req: Au
   const { active } = req.body || {};
   db.prepare('UPDATE promotions SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
   logAudit(req.authUser!.userId, req.authUser!.email, 'TOGGLE_PROMOTION', 'promotion', id, { active });
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1692,6 +1730,7 @@ app.patch('/api/admin/personalities/:id', requirePermission('brand'), (req: Auth
     id
   );
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_PERSONALITY', 'personality', id, {});
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1713,6 +1752,7 @@ app.patch('/api/admin/origins/:id', requirePermission('brand'), (req: AuthedRequ
     id
   );
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_ORIGIN', 'coffee_origin', id, {});
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1765,6 +1805,7 @@ app.post('/api/admin/media', requirePermission('media'), (req: AuthedRequest, re
 
   const asset = db.prepare('SELECT * FROM media_assets WHERE id = ?').get(Number(info.lastInsertRowid));
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPLOAD_MEDIA', 'media_asset', Number(info.lastInsertRowid), { url });
+  scheduleSnapshotSync(db);
   res.status(201).json({ ok: true, asset });
 });
 
@@ -1781,6 +1822,7 @@ app.patch('/api/admin/media/:id', requirePermission('media'), (req: AuthedReques
     altText ?? existing.alt_text,
     id
   );
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1800,6 +1842,7 @@ app.delete('/api/admin/media/:id', requirePermission('media'), (req: AuthedReque
   }
   db.prepare('DELETE FROM media_assets WHERE id = ?').run(id);
   logAudit(req.authUser!.userId, req.authUser!.email, 'DELETE_MEDIA', 'media_asset', id, { url: existing.url });
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1845,6 +1888,7 @@ app.post('/api/admin/journal', requirePermission('posts'), (req: AuthedRequest, 
     );
   const newId = Number(resInsert.lastInsertRowid);
   logAudit(req.authUser!.userId, req.authUser!.email, 'CREATE_ARTICLE', 'journal_article', newId, { slug });
+  scheduleSnapshotSync(db);
   res.status(201).json({ ok: true, id: newId, slug });
 });
 
@@ -1881,6 +1925,7 @@ app.patch('/api/admin/journal/:id', requirePermission('posts'), (req: AuthedRequ
     id
   );
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_ARTICLE', 'journal_article', id, { slug: nextSlug });
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1893,6 +1938,7 @@ app.delete('/api/admin/journal/:id', requirePermission('posts'), (req: AuthedReq
   }
   db.prepare('DELETE FROM journal_articles WHERE id = ?').run(id);
   logAudit(req.authUser!.userId, req.authUser!.email, 'DELETE_ARTICLE', 'journal_article', id, { slug: existing.slug });
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
 });
 
@@ -1950,6 +1996,7 @@ app.patch('/api/admin/pages/:slug', requirePermission('pages'), (req: AuthedRequ
     title_vi: b.title_vi ?? existing.title_vi,
   });
   const updated = db.prepare('SELECT * FROM cms_pages WHERE slug = ?').get(slug) as any;
+  scheduleSnapshotSync(db);
   res.json({ ok: true, page: { ...updated, sections: JSON.parse(updated.sections_json || '[]') } });
 });
 
@@ -2133,12 +2180,128 @@ app.patch('/api/admin/settings', requirePermission('settings'), (req: AuthedRequ
     upsert.run(k, String(v));
   }
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_SITE_SETTINGS', 'site_settings', 'global', updates);
+  scheduleSnapshotSync(db);
   res.json({ ok: true });
+});
+
+// ---------- PORTABLE GITHUB SNAPSHOT SYNC / DOWNLOAD / RESTORE ----------
+app.post('/api/admin/snapshot/sync', requirePermission('settings'), (req: AuthedRequest, res) => {
+  const snap = exportCmsSnapshotToDisk(db);
+  logAudit(req.authUser!.userId, req.authUser!.email, 'SYNC_CMS_SNAPSHOT', 'snapshot', 'roar-cms-snapshot.json', {
+    products: snap.tables.products.length,
+    origins: snap.tables.coffee_origins.length,
+    pages: snap.tables.cms_pages.length,
+    articles: snap.tables.journal_articles.length,
+  });
+  res.json({
+    ok: true,
+    exportedAt: snap.exportedAt,
+    counts: {
+      products: snap.tables.products.length,
+      origins: snap.tables.coffee_origins.length,
+      pages: snap.tables.cms_pages.length,
+      articles: snap.tables.journal_articles.length,
+      personalities: snap.tables.personalities.length,
+      promotions: snap.tables.promotions.length,
+      media: snap.tables.media_assets.length,
+    },
+  });
+});
+
+app.get('/api/admin/snapshot/download', requirePermission('settings'), (_req, res) => {
+  const snap = buildCmsSnapshot(db);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="roar-coffee-cms-backup.json"');
+  res.send(JSON.stringify(snap, null, 2));
+});
+
+app.post('/api/admin/snapshot/restore', requirePermission('settings'), (req: AuthedRequest, res) => {
+  const body = req.body || {};
+  const restored = restoreFromSnapshot(db, {
+    force: true,
+    snapshotData: body && body.tables ? body : undefined,
+  });
+  if (!restored) {
+    res.status(400).json({ error: 'Không tìm thấy tệp Snapshot hợp lệ để khôi phục.' });
+    return;
+  }
+  exportCmsSnapshotToDisk(db);
+  logAudit(req.authUser!.userId, req.authUser!.email, 'RESTORE_CMS_SNAPSHOT', 'snapshot', 'roar-cms-snapshot.json', {});
+  res.json({ ok: true });
+});
+
+// ---------- ADMIN AI AUTO-TRANSLATION (VI -> EN) & VIETCOMBANK EXCHANGE RATE SYNC ----------
+app.post('/api/admin/translate-vi-en', requirePermission('products', 'posts', 'pages', 'brand'), async (req, res) => {
+  try {
+    const translations = await translateProductViToEn(req.body || {});
+    res.json({ ok: true, translations });
+  } catch (err: any) {
+    if (err instanceof GeminiTranslationError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    res.status(500).json({ error: err?.message || 'Lỗi dịch tự động VI → EN' });
+  }
+});
+
+app.post('/api/admin/exchange-rate/vietcombank/sync', requirePermission('products', 'settings'), async (req: AuthedRequest, res) => {
+  const { rateMode, applyToAllProducts } = req.body || {};
+  const validMode: VcbRateMode | undefined =
+    rateMode === 'buy' || rateMode === 'transfer' || rateMode === 'sell' ? rateMode : undefined;
+  if (validMode) {
+    db.prepare(
+      "INSERT INTO site_settings (key, value) VALUES ('vcb_rate_mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(validMode);
+  }
+  const rate = await getVietcombankUsdRate(db, { force: true, modeOverride: validMode });
+
+  let updatedProducts = 0;
+  if (applyToAllProducts) {
+    const allProducts = db.prepare('SELECT id, price_vnd, variants_json FROM products').all() as Array<{
+      id: number;
+      price_vnd: number;
+      variants_json: string;
+    }>;
+    const updStmt = db.prepare('UPDATE products SET price_usd = ?, variants_json = ? WHERE id = ?');
+    const tx = db.transaction(() => {
+      for (const p of allProducts) {
+        const nextUsd = convertVndToUsdByRate(p.price_vnd, rate.activeRate);
+        let variants: any[] = [];
+        try {
+          variants = JSON.parse(p.variants_json || '[]');
+        } catch {
+          variants = [];
+        }
+        const nextVariants = Array.isArray(variants)
+          ? variants.map((v) => ({
+              ...v,
+              priceUsd:
+                Number(v.priceVnd) > 0
+                  ? convertVndToUsdByRate(Number(v.priceVnd), rate.activeRate)
+                  : Number(v.priceUsd || 0),
+            }))
+          : [];
+        updStmt.run(nextUsd, JSON.stringify(nextVariants), p.id);
+        updatedProducts += 1;
+      }
+    });
+    tx();
+    logAudit(req.authUser!.userId, req.authUser!.email, 'SYNC_VCB_RATES_CATALOG', 'products', 'all', {
+      activeRate: rate.activeRate,
+      rateMode: rate.rateMode,
+      updatedProducts,
+    });
+  }
+  scheduleSnapshotSync(db);
+  res.json({ ok: true, rate, updatedProducts });
 });
 
 // ---------- VITE / STATIC SERVING ----------
 async function startServer() {
-  if (!IS_PROD) {
+  const distDir = path.resolve(process.cwd(), 'dist');
+  const useProdStatic = IS_PROD && fs.existsSync(distDir);
+
+  if (!useProdStatic) {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -2150,13 +2313,10 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use('/src/assets', express.static(path.resolve(process.cwd(), 'src/assets')));
-    const distDir = path.resolve(process.cwd(), 'dist');
-    if (fs.existsSync(distDir)) {
-      app.use(express.static(distDir));
-      app.get('*', (_req, res) => {
-        res.sendFile(path.join(distDir, 'index.html'));
-      });
-    }
+    app.use(express.static(distDir));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {

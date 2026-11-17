@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ALL_ADMIN_PERMISSIONS, ADMIN_ROLE_PRESETS, hashPassword } from './auth.ts';
+import { exportCmsSnapshotToDisk, restoreFromSnapshot } from './snapshot.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
@@ -10,7 +11,14 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const DB_PATH = path.join(DATA_DIR, 'roar_coffee.db');
 export const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+// Flush any prior WAL frames cleanly and run in single-file DELETE mode so data/roar_coffee.db
+// stays 100% self-contained when downloaded, zipped, or pushed to GitHub.
+try {
+  db.pragma('wal_checkpoint(TRUNCATE)');
+} catch {
+  // ignore
+}
+db.pragma('journal_mode = DELETE');
 db.pragma('foreign_keys = ON');
 
 export function initDatabase(): void {
@@ -339,8 +347,10 @@ export function initDatabase(): void {
     );
   `);
 
+  restoreFromSnapshot(db);
   seedInitialData();
   runIncrementalMigrations();
+  exportCmsSnapshotToDisk(db);
 }
 
 function seedInitialData(): void {
@@ -1729,33 +1739,14 @@ function runIncrementalMigrations(): void {
     WHERE slug = 'fox' AND associated_product_slug != 'roar-espresso'
   `).run();
 
-  // 2. Upsert all 10 comprehensive Vietnamese coffee growing regions
+  // 2. Backfill any missing Vietnamese coffee growing regions without overwriting CMS customizations
   const upsertOrigin = db.prepare(`
-    INSERT INTO coffee_origins (
+    INSERT OR IGNORE INTO coffee_origins (
       slug, region_name_vi, region_name_en, localities_vi, localities_en,
       elevation, varieties, processing_methods, sourcing_status,
       characteristics_vi, characteristics_en, sourcing_note_vi, sourcing_note_en,
       map_x, map_y, latitude, longitude, image_key, photo_attribution, related_skus_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(slug) DO UPDATE SET
-      region_name_vi = excluded.region_name_vi,
-      region_name_en = excluded.region_name_en,
-      localities_vi = excluded.localities_vi,
-      localities_en = excluded.localities_en,
-      elevation = excluded.elevation,
-      varieties = excluded.varieties,
-      processing_methods = excluded.processing_methods,
-      characteristics_vi = excluded.characteristics_vi,
-      characteristics_en = excluded.characteristics_en,
-      sourcing_note_vi = excluded.sourcing_note_vi,
-      sourcing_note_en = excluded.sourcing_note_en,
-      map_x = excluded.map_x,
-      map_y = excluded.map_y,
-      latitude = excluded.latitude,
-      longitude = excluded.longitude,
-      image_key = excluded.image_key,
-      photo_attribution = excluded.photo_attribution,
-      related_skus_json = excluded.related_skus_json
   `);
 
   for (const o of VIETNAM_COFFEE_ORIGINS) {

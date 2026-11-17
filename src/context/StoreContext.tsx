@@ -1,4 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { fetchBootstrapWithFallback } from '../lib/staticFallback';
+import type { RawGalleryItem } from '../lib/media';
 
 export interface ProductVariant {
   label: string;
@@ -45,7 +47,7 @@ export interface Product {
   defect_info: string;
   grading_spec: string;
   image_key: string;
-  gallery_images?: string[];
+  gallery_images?: RawGalleryItem[];
   featured: number;
 }
 
@@ -165,6 +167,18 @@ export interface BreadcrumbNode {
   to?: string;
 }
 
+export interface VietcombankRateInfo {
+  buy: number;
+  transfer: number;
+  sell: number;
+  rateMode: 'sell' | 'transfer' | 'buy';
+  activeRate: number;
+  bankDateTime: string;
+  fetchedAt: string;
+  source: string;
+  isLive: boolean;
+}
+
 interface StoreContextValue {
   user: AuthUser | null;
   authToken: string | null;
@@ -174,6 +188,9 @@ interface StoreContextValue {
   refreshUser: () => Promise<void>;
   currency: 'VND' | 'USD';
   setCurrency: (c: 'VND' | 'USD') => void;
+  vcbRate: number;
+  vcbRateInfo: VietcombankRateInfo | null;
+  refreshVcbRate: (force?: boolean) => Promise<VietcombankRateInfo | null>;
   formatPrice: (vnd: number, usd?: number) => string;
   cart: CartItem[];
   cartOpen: boolean;
@@ -264,6 +281,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [loyaltySettings, setLoyaltySettings] = useState<any>(null);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [cmsPages, setCmsPages] = useState<Record<string, CmsPageData>>({});
+  const [vcbRateInfo, setVcbRateInfo] = useState<VietcombankRateInfo | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [customBreadcrumb, setCustomBreadcrumb] = useState<BreadcrumbNode[] | null>(null);
 
@@ -321,16 +339,56 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [authToken]);
 
+  const refreshVcbRate = useCallback(async (force = false): Promise<VietcombankRateInfo | null> => {
+    try {
+      const res = await fetch(`/api/exchange-rate/vietcombank${force ? '?refresh=1' : ''}`);
+      if (!res.ok) return null;
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) return null;
+      const data = await res.json();
+      if (data?.rate) {
+        setVcbRateInfo(data.rate);
+        return data.rate as VietcombankRateInfo;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const refreshBootstrap = useCallback(async () => {
     try {
-      const res = await fetch('/api/site-bootstrap');
-      const data = await res.json();
+      const data = await fetchBootstrapWithFallback();
+      if (!data) return;
       setPersonalities(data.personalities || []);
       setOrigins(data.origins || []);
       setTiers(data.tiers || []);
       setLoyaltySettings(data.loyaltySettings || null);
-      setSettings(data.settings || {});
+      const nextSettings = data.settings || {};
+      setSettings(nextSettings);
       setCmsPages(data.cmsPages || {});
+      if (nextSettings.vcb_usd_sell || nextSettings.vcb_usd_transfer) {
+        const mode = nextSettings.vcb_rate_mode === 'buy' || nextSettings.vcb_rate_mode === 'transfer'
+          ? nextSettings.vcb_rate_mode
+          : 'sell';
+        const buy = Number(nextSettings.vcb_usd_buy) || 25520;
+        const transfer = Number(nextSettings.vcb_usd_transfer) || 25550;
+        const sell = Number(nextSettings.vcb_usd_sell) || 25930;
+        const activeRate = mode === 'buy' ? buy : mode === 'transfer' ? transfer : sell;
+        setVcbRateInfo((prev) =>
+          prev || {
+            buy,
+            transfer,
+            sell,
+            rateMode: mode,
+            activeRate,
+            bankDateTime: nextSettings.vcb_usd_updated_at || '',
+            fetchedAt: nextSettings.vcb_usd_updated_at || '',
+            source: 'Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)',
+            isLive: false,
+          }
+        );
+      }
     } catch {
       // silent
     }
@@ -339,7 +397,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     refreshUser();
     refreshBootstrap();
-  }, [refreshUser, refreshBootstrap]);
+    refreshVcbRate(false);
+  }, [refreshUser, refreshBootstrap, refreshVcbRate]);
 
   useEffect(() => {
     safeSetStorage('roar_cart', JSON.stringify(cart));
@@ -405,9 +464,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setRecentlyViewed((prev) => [slug, ...prev.filter((s) => s !== slug)].slice(0, 6));
   }, []);
 
+  const vcbRate = vcbRateInfo?.activeRate || Number(settings.vcb_usd_sell) || 25930;
+
   const formatPrice = (vnd: number, usd?: number) => {
     if (currency === 'USD') {
-      const val = usd !== undefined && usd > 0 ? usd : vnd / 25000;
+      const val = usd !== undefined && usd > 0 ? usd : vnd / vcbRate;
       return `$${val.toFixed(2)}`;
     }
     return `${vnd.toLocaleString('vi-VN')} ₫`;
@@ -427,6 +488,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         refreshUser,
         currency,
         setCurrency,
+        vcbRate,
+        vcbRateInfo,
+        refreshVcbRate,
         formatPrice,
         cart,
         cartOpen,

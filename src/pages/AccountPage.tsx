@@ -7,7 +7,7 @@ import { localizeLedgerEntry, localizeOrderStatus, localizePaymentStatus, locali
 
 export const AccountPage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
-  const { user, setAuthSession, clearAuthSession, apiFetch, refreshUser, formatPrice, addToCart, showToast } = useStore();
+  const { user, setAuthSession, clearAuthSession, apiFetch, refreshUser, formatPrice, addToCart, showToast, vcbRate } = useStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
@@ -249,7 +249,7 @@ export const AccountPage: React.FC = () => {
         nameEn: item.product_name_en,
         variantLabel: item.variant_label,
         unitPriceVnd: item.unit_price_vnd,
-        unitPriceUsd: item.unit_price_vnd / 25000,
+        unitPriceUsd: Number((item.unit_price_vnd / vcbRate).toFixed(2)),
         quantity: item.quantity,
         imageKey: item.product_image_key || 'product_robusta_house',
       });

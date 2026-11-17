@@ -237,9 +237,9 @@ export const JournalManagerSection: React.FC<JournalManagerSectionProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 items-start">
             {/* Main Editor Column */}
-            <div className="lg:col-span-8 bg-white p-6 rounded-xl border border-slate-200 space-y-4 text-xs">
+            <div className="lg:col-span-8 bg-white p-3.5 sm:p-6 rounded-xl border border-slate-200 space-y-3.5 sm:space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
                   {t('Tiêu đề bài viết (Tiếng Việt) *', 'Post Title (VI) *')}
@@ -480,20 +480,20 @@ export const JournalManagerSection: React.FC<JournalManagerSectionProps> = ({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Top Action & Filter Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+      <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2.5 sm:gap-3">
+        <div className="flex items-center gap-1.5 text-xs overflow-x-auto pb-0.5 sm:pb-0 no-scrollbar">
           {[
             { id: 'all', label: `${t('Tất cả', 'All')} (${articles.length})` },
-            { id: 'published', label: `${t('Đã xuất bản', 'Published')} (${articles.filter((a) => a.published).length})` },
-            { id: 'draft', label: `${t('Bản nháp', 'Drafts')} (${articles.filter((a) => !a.published).length})` },
+            { id: 'published', label: `${t('Xuất bản', 'Published')} (${articles.filter((a) => a.published).length})` },
+            { id: 'draft', label: `${t('Nháp', 'Drafts')} (${articles.filter((a) => !a.published).length})` },
           ].map((st) => (
             <button
               key={st.id}
               type="button"
               onClick={() => setStatusFilter(st.id as any)}
-              className={`px-3 py-1.5 rounded-lg font-semibold cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap shrink-0 cursor-pointer ${
                 statusFilter === st.id ? 'bg-[#00552B] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
@@ -504,9 +504,9 @@ export const JournalManagerSection: React.FC<JournalManagerSectionProps> = ({
           <select
             value={catFilter}
             onChange={(e) => setCatFilter(e.target.value)}
-            className="border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700"
+            className="border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 shrink-0"
           >
-            <option value="all">{t('Tất cả chuyên mục', 'All Categories')}</option>
+            <option value="all">{t('Tất cả mục', 'All Topics')}</option>
             {JOURNAL_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {localizeJournalCategory(c, lang)}
@@ -516,37 +516,96 @@ export const JournalManagerSection: React.FC<JournalManagerSectionProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="relative">
+          <div className="relative flex-1 sm:flex-none">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('Tìm tiêu đề bài viết...', 'Search posts...')}
-              className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-52"
+              placeholder={t('Tìm bài viết...', 'Search posts...')}
+              className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-full sm:w-52"
             />
           </div>
           <button
             type="button"
             onClick={openCreateEditor}
-            className="px-3.5 py-2 bg-[#00552B] hover:bg-[#003D25] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-[#00552B] hover:bg-[#003D25] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            {t('Viết bài mới', 'Add New Post')}
+            {t('Viết bài mới', 'Add Post')}
           </button>
         </div>
       </div>
 
-      {/* Posts Table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+      {/* Posts List: Compact Mobile Cards + Desktop Table */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {filteredArticles.length === 0 ? (
-          <div className="p-12 text-center space-y-2 text-slate-500">
+          <div className="p-10 text-center space-y-2 text-slate-500">
             <FileText className="w-8 h-8 mx-auto text-slate-300" />
             <p className="text-sm font-medium">{t('Chưa có bài viết nào phù hợp.', 'No posts match your filter.')}</p>
           </div>
         ) : (
-          <table className="w-full text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+          <>
+            <div className="md:hidden divide-y divide-slate-100 text-xs">
+              {filteredArticles.map((a) => (
+                <div key={a.id} className="p-3 flex items-start gap-2.5">
+                  <img
+                    src={resolveMediaUrl(a.image_key)}
+                    alt={a.title_vi}
+                    className="w-11 aspect-[4/5] rounded-lg object-cover border border-slate-200 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => openEditEditor(a)}
+                      className="font-bold text-slate-900 hover:text-[#00552B] text-left line-clamp-2 cursor-pointer"
+                    >
+                      {lang === 'en' ? a.title_en : a.title_vi}
+                    </button>
+                    <p className="text-[11px] text-slate-500 truncate">
+                      {localizeJournalCategory(a.category, lang)} · {a.read_minutes} {t('phút', 'min')}
+                    </p>
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePublish(a)}
+                        className={`px-2 py-0.5 rounded font-semibold text-[11px] cursor-pointer ${
+                          a.published ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {a.published ? t('Đã xuất bản', 'Published') : t('Bản nháp', 'Draft')}
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditEditor(a)}
+                          className="px-2 py-1 border border-slate-200 rounded hover:bg-slate-50 font-semibold cursor-pointer"
+                        >
+                          {t('Sửa', 'Edit')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            confirmDeleteId === a.id ? handleDeletePost(a.id) : setConfirmDeleteId(a.id)
+                          }
+                          className={`px-2 py-1 rounded border cursor-pointer ${
+                            confirmDeleteId === a.id
+                              ? 'bg-red-600 text-white border-red-600'
+                              : 'border-slate-200 text-red-600'
+                          }`}
+                        >
+                          {confirmDeleteId === a.id ? t('Xác nhận', 'Confirm') : <Trash2 className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
               <tr>
                 <th className="p-3 text-left">{t('Bài viết', 'Post')}</th>
                 <th className="p-3 text-left">{t('Chuyên mục', 'Category')}</th>
@@ -649,6 +708,8 @@ export const JournalManagerSection: React.FC<JournalManagerSectionProps> = ({
               ))}
             </tbody>
           </table>
+            </div>
+          </>
         )}
       </div>
     </div>

@@ -44,6 +44,14 @@
   padding-top: env(safe-area-inset-top, 0px);
 }
 
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 @keyframes heroProgress {
   from {
     transform: scaleX(0);

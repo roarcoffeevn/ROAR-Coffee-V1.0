@@ -227,7 +227,7 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
                           : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
                     >
-                      <div className="aspect-square relative bg-slate-100 overflow-hidden">
+                      <div className="aspect-[4/5] relative bg-slate-100 overflow-hidden">
                         <img
                           src={resolveMediaUrl(item.previewUrl)}
                           alt={item.label}

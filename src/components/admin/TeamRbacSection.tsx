@@ -195,33 +195,53 @@ export const TeamRbacSection: React.FC<TeamRbacSectionProps> = ({
   };
 
   return (
-    <div className="space-y-6 text-xs">
+    <div className="space-y-3.5 sm:space-y-5 text-xs">
       {/* Top Action Header */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+      <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-0.5 sm:space-y-1">
+          <h2 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-[#00552B]" />
-            {t('Phân quyền Thành viên Quản trị (RBAC)', 'Administrator Team & Role-Based Access Control')}
+            {t('Phân quyền Thành viên (RBAC)', 'Team & Access Control (RBAC)')}
           </h2>
-          <p className="text-slate-500">
+          <p className="text-[11px] sm:text-xs text-slate-500">
             {t(
-              'Kiểm soát chi tiết từng vai trò (Quản trị Tối cao, Quản lý Đơn hàng, Biên tập Nội dung, Quản lý Sản phẩm, CSKH & B2B) trên tất cả API quản trị.',
-              'Assign preset roles or granular module permissions enforced live across every CMS API endpoint.'
+              'Kiểm soát chi tiết quyền truy cập từng phân hệ CMS trên máy chủ.',
+              'Assign preset roles or granular module permissions enforced live across CMS APIs.'
             )}
           </p>
         </div>
         <button
           type="button"
           onClick={() => setCreateOpen((o) => !o)}
-          className="px-4 py-2.5 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+          className="w-full sm:w-auto justify-center px-3.5 py-2 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer"
         >
           <UserPlus className="w-4 h-4" />
           {createOpen ? t('Đóng biểu mẫu', 'Close Form') : t('+ Thêm / Cấp quyền Quản trị viên', '+ Add / Promote Admin Staff')}
         </button>
       </div>
 
-      {/* Role Preset Guide Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* Compact Collapsible Role Preset Guide on Mobile */}
+      <details className="lg:hidden bg-white rounded-xl border border-slate-200 px-3.5 py-2.5">
+        <summary className="font-bold text-slate-800 cursor-pointer select-none">
+          {t('Xem 5 Nhóm vai trò mẫu (RBAC Presets)', 'View 5 Role Presets Guide')}
+        </summary>
+        <div className="mt-2.5 grid grid-cols-1 gap-2">
+          {ADMIN_ROLE_PRESETS.filter((r) => r.key !== 'custom_staff').map((preset) => (
+            <div key={preset.key} className="bg-slate-50 rounded-lg border border-slate-200/80 p-2.5 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <span className="font-bold text-slate-900 block">{lang === 'vi' ? preset.labelVi : preset.labelEn}</span>
+                <p className="text-[11px] text-slate-500">{lang === 'vi' ? preset.descVi : preset.descEn}</p>
+              </div>
+              <span className="font-mono text-[11px] text-[#00552B] font-semibold tabular-nums shrink-0">
+                {preset.permissions.length}/12
+              </span>
+            </div>
+          ))}
+        </div>
+      </details>
+
+      {/* Desktop Role Preset Guide Strip */}
+      <div className="hidden lg:grid lg:grid-cols-3 gap-3">
         {ADMIN_ROLE_PRESETS.filter((r) => r.key !== 'custom_staff').map((preset) => (
           <div key={preset.key} className="bg-white rounded-xl border border-slate-200 p-4 space-y-1.5">
             <div className="flex items-center justify-between gap-2">
@@ -350,13 +370,13 @@ export const TeamRbacSection: React.FC<TeamRbacSectionProps> = ({
 
             <div>
               <p className="font-semibold text-slate-700 mb-2">{t('Chi tiết quyền truy cập từng phân hệ CMS', 'Granular Module Permissions')}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2">
                 {ADMIN_PERMISSION_META.map((pm) => {
                   const checked = newRole === 'super_admin' || newPerms.includes(pm.key);
                   return (
                     <label
                       key={pm.key}
-                      className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      className={`flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 rounded-lg border cursor-pointer transition-colors ${
                         checked ? 'bg-[#00552B]/8 border-[#00552B]/35 text-slate-900' : 'bg-slate-50 border-slate-200 text-slate-500'
                       }`}
                     >
@@ -483,13 +503,13 @@ export const TeamRbacSection: React.FC<TeamRbacSectionProps> = ({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2">
                       {ADMIN_PERMISSION_META.map((pm) => {
                         const checked = editRole === 'super_admin' || editPerms.includes(pm.key);
                         return (
                           <label
                             key={pm.key}
-                            className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer ${
+                            className={`flex items-center gap-1.5 sm:gap-2 p-2 sm:p-2.5 rounded-lg border cursor-pointer ${
                               checked ? 'bg-white border-[#00552B] text-slate-900' : 'bg-slate-100/70 border-slate-200 text-slate-500'
                             }`}
                           >

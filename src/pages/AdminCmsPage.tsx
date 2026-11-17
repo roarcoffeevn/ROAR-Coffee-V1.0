@@ -7,6 +7,8 @@ import {
   CheckCircle2,
   Clock,
   Compass,
+  Database,
+  Download,
   Edit3,
   ExternalLink,
   Eye,
@@ -21,6 +23,7 @@ import {
   Package,
   PackageCheck,
   Plus,
+  RefreshCw,
   RotateCcw,
   Search,
   Send,
@@ -31,6 +34,7 @@ import {
   Tag,
   Trash2,
   Truck,
+  Upload,
   Users,
   X,
   XCircle,
@@ -81,8 +85,19 @@ const PAYMENT_STATUS_LIST = ['awaiting_payment', 'pending_verification', 'paid',
 
 export const AdminCmsPage: React.FC = () => {
   const { lang, setLang, t } = useI18n();
-  const { user, setAuthSession, clearAuthSession, apiFetch, personalities, origins, refreshBootstrap, showToast } =
-    useStore();
+  const {
+    user,
+    setAuthSession,
+    clearAuthSession,
+    apiFetch,
+    personalities,
+    origins,
+    refreshBootstrap,
+    showToast,
+    vcbRate,
+    vcbRateInfo,
+    refreshVcbRate,
+  } = useStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [email, setEmail] = useState('');
@@ -150,9 +165,41 @@ export const AdminCmsPage: React.FC = () => {
   const [promoEnd, setPromoEnd] = useState('2027-12-31');
   const [promoNotifyCustomers, setPromoNotifyCustomers] = useState(true);
 
-  // Brand Personality Media Picker
+  // Brand Personality Media Picker & Site Settings + Portable Snapshot
   const [mascotPickerId, setMascotPickerId] = useState<number | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [syncingSnapshot, setSyncingSnapshot] = useState(false);
+  const [restoringSnapshot, setRestoringSnapshot] = useState(false);
+  const [syncingVcbCatalog, setSyncingVcbCatalog] = useState(false);
+  const [snapshotSummary, setSnapshotSummary] = useState<{ exportedAt?: string; counts?: Record<string, number> } | null>(
+    null
+  );
+
+  const handleSyncCatalogVcbRates = async () => {
+    setSyncingVcbCatalog(true);
+    try {
+      const res = await apiFetch('/api/admin/exchange-rate/vietcombank/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applyToAllProducts: true }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await refreshVcbRate(false);
+        await loadAll();
+        showToast(
+          t(
+            `Đã cập nhật giá USD cho ${d.updatedProducts || products.length} sản phẩm theo tỉ giá Vietcombank (1 USD = ${(d.rate?.activeRate || vcbRate).toLocaleString('vi-VN')} ₫)`,
+            `Updated USD pricing for ${d.updatedProducts || products.length} products via Vietcombank rate`
+          )
+        );
+      } else {
+        showToast(d.error || t('Không thể đồng bộ tỉ giá Vietcombank', 'VCB rate sync failed'));
+      }
+    } finally {
+      setSyncingVcbCatalog(false);
+    }
+  };
 
   const isAdmin = user?.role === 'admin';
   const canMedia =
@@ -509,6 +556,73 @@ export const AdminCmsPage: React.FC = () => {
     }
   };
 
+  const handleSyncSnapshot = async () => {
+    setSyncingSnapshot(true);
+    try {
+      const res = await apiFetch('/api/admin/snapshot/sync', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setSnapshotSummary({ exportedAt: d.exportedAt, counts: d.counts });
+        showToast(
+          t(
+            'Đã đồng bộ SQLite + Snapshot JSON vào source (sẵn sàng đẩy GitHub)',
+            'Synced SQLite + JSON snapshots to workspace'
+          )
+        );
+      } else {
+        showToast(d.error || t('Không thể đồng bộ snapshot', 'Snapshot sync failed'));
+      }
+    } finally {
+      setSyncingSnapshot(false);
+    }
+  };
+
+  const handleDownloadSnapshot = async () => {
+    const res = await apiFetch('/api/admin/snapshot/download');
+    if (!res.ok) {
+      showToast(t('Không thể tải bản sao lưu', 'Download failed'));
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `roar-coffee-cms-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(t('Đã tải tệp sao lưu CMS (.json)', 'Downloaded CMS JSON backup'));
+  };
+
+  const handleUploadRestoreSnapshot = async (file: File | undefined) => {
+    if (!file) return;
+    setRestoringSnapshot(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed?.tables) {
+        showToast(t('Tệp JSON không đúng định dạng snapshot ROAR.', 'Invalid ROAR snapshot JSON format.'));
+        return;
+      }
+      const res = await apiFetch('/api/admin/snapshot/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshotData: parsed }),
+      });
+      if (res.ok) {
+        await refreshBootstrap();
+        await loadAll();
+        showToast(t('Đã khôi phục 100% dữ liệu từ bản sao lưu!', 'Restored 100% data from backup snapshot!'));
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || t('Khôi phục thất bại', 'Restore failed'));
+      }
+    } catch {
+      showToast(t('Không đọc được tệp JSON sao lưu.', 'Failed to parse backup JSON file.'));
+    } finally {
+      setRestoringSnapshot(false);
+    }
+  };
+
   // ---------- LOGIN SCREEN ----------
   if (!user || !isAdmin) {
     return (
@@ -793,12 +907,12 @@ export const AdminCmsPage: React.FC = () => {
       {/* Main Content Workspace */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Top WordPress Admin Header */}
-        <header className="h-14 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="h-12 sm:h-14 bg-white border-b border-slate-200 px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 sticky top-0 z-30">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="lg:hidden p-1.5 rounded-lg border border-slate-200 text-slate-700 cursor-pointer"
+              className="lg:hidden p-1.5 rounded-lg border border-slate-200 text-slate-700 cursor-pointer shrink-0"
               aria-label={t('Mở menu quản trị', 'Open CMS menu')}
             >
               <Menu className="w-4 h-4" />
@@ -806,12 +920,12 @@ export const AdminCmsPage: React.FC = () => {
             <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">{activeNavItem?.label}</h1>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden text-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden text-[11px] sm:text-xs">
               <button
                 type="button"
                 onClick={() => setLang('vi')}
-                className={`px-2.5 py-1 font-semibold cursor-pointer ${
+                className={`px-2 sm:px-2.5 py-1 font-semibold cursor-pointer ${
                   lang === 'vi' ? 'bg-[#00552B] text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
@@ -820,7 +934,7 @@ export const AdminCmsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setLang('en')}
-                className={`px-2.5 py-1 font-semibold cursor-pointer ${
+                className={`px-2 sm:px-2.5 py-1 font-semibold cursor-pointer ${
                   lang === 'en' ? 'bg-[#00552B] text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
@@ -830,61 +944,85 @@ export const AdminCmsPage: React.FC = () => {
 
             <Link
               to="/"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:border-[#00552B] text-xs font-semibold text-[#00552B] bg-white whitespace-nowrap"
+              className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-slate-200 hover:border-[#00552B] text-[11px] sm:text-xs font-semibold text-[#00552B] bg-white whitespace-nowrap"
             >
-              <span>{t('Xem cửa hàng', 'Visit Store')}</span>
+              <span className="hidden sm:inline">{t('Xem cửa hàng', 'Visit Store')}</span>
+              <span className="sm:hidden">{t('Web', 'Site')}</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </Link>
           </div>
         </header>
 
+        {/* Compact Mobile Quick Module Strip */}
+        <nav
+          aria-label={t('Điều hướng nhanh CMS', 'Quick CMS navigation')}
+          className="lg:hidden bg-white border-b border-slate-200 px-2.5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar sticky top-12 z-20"
+        >
+          {navGroups.flatMap((g) => g.items).map((item) => {
+            const active = resolvedSection === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => selectSection(item.id)}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                  active ? 'bg-[#00552B] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
         {/* Active Section Body */}
-        <main className="flex-1 p-4 sm:p-6 max-w-[1440px] w-full mx-auto space-y-6">
+        <main className="flex-1 p-2.5 sm:p-6 max-w-[1440px] w-full mx-auto space-y-3 sm:space-y-6">
           {/* 1. OVERVIEW DASHBOARD */}
           {resolvedSection === 'overview' && hasAdminPermission(user, 'overview') && (
-            <div className="space-y-6">
+            <div className="space-y-3.5 sm:space-y-6">
               {/* Quick Actions */}
-              <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900">
-                    {t('Chào mừng đến với Hệ thống Quản trị ROAR COFFEE', 'Welcome to ROAR COFFEE CMS')}
+                    {t('Hệ thống Quản trị ROAR COFFEE', 'ROAR COFFEE CMS Workspace')}
                   </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
                     {t(
-                      'Quản lý trang con website, bài viết tạp chí, kho thư viện hình ảnh, danh mục sản phẩm và đơn hàng trực tuyến.',
-                      'Manage storefront subpages, journal posts, media library assets, catalog, and orders.'
+                      'Quản lý trang con, bài viết, hình ảnh, sản phẩm và đơn hàng trực tuyến.',
+                      'Manage subpages, posts, media library, catalog, and orders.'
                     )}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 text-xs">
                   {hasAdminPermission(user, 'pages') && (
                     <button
                       type="button"
                       onClick={() => selectSection('pages')}
-                      className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <FileEdit className="w-3.5 h-3.5 text-[#00552B]" />
-                      {t('Sửa Trang con', 'Edit Subpages')}
+                      {t('Sửa Trang con', 'Subpages')}
                     </button>
                   )}
                   {hasAdminPermission(user, 'posts') && (
                     <button
                       type="button"
                       onClick={() => selectSection('posts')}
-                      className="px-3.5 py-2 rounded-lg bg-[#00552B] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-2 rounded-lg bg-[#00552B] text-white font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <FileText className="w-3.5 h-3.5" />
-                      {t('Quản lý Bài viết', 'Manage Posts')}
+                      {t('Bài viết', 'Posts')}
                     </button>
                   )}
                   {hasAdminPermission(user, 'media') && (
                     <button
                       type="button"
                       onClick={() => selectSection('media')}
-                      className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <ImageIcon className="w-3.5 h-3.5" />
-                      {t('Tải ảnh lên Thư viện', 'Upload Media')}
+                      {t('Thư viện ảnh', 'Media')}
                     </button>
                   )}
                   {hasAdminPermission(user, 'products') && (
@@ -895,10 +1033,10 @@ export const AdminCmsPage: React.FC = () => {
                         selectSection('products');
                         setProductModalOpen(true);
                       }}
-                      className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      {t('Thêm Sản phẩm mới', 'Add New Product')}
+                      {t('Thêm Sản phẩm', 'New Product')}
                     </button>
                   )}
                 </div>
@@ -907,83 +1045,83 @@ export const AdminCmsPage: React.FC = () => {
               {overview && (
                 <>
                   {/* KPI Cards */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-white p-5 rounded-xl border border-slate-200">
-                      <span className="text-xs font-medium text-slate-500">{t('Tổng doanh thu (CSDL)', 'Total Revenue (DB)')}</span>
-                      <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-slate-900">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+                    <div className="bg-white p-3 sm:p-5 rounded-xl border border-slate-200">
+                      <span className="text-[11px] sm:text-xs font-medium text-slate-500">{t('Tổng doanh thu', 'Total Revenue')}</span>
+                      <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums mt-0.5 sm:mt-1 text-slate-900 truncate">
                         {overview.metrics.revenue.toLocaleString()} ₫
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1 tabular-nums">
-                        {t('Giá trị TB đơn:', 'Avg order:')} {overview.metrics.avgOrderValue.toLocaleString()} ₫
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 sm:mt-1 tabular-nums truncate">
+                        {t('TB đơn:', 'Avg:')} {overview.metrics.avgOrderValue.toLocaleString()} ₫
                       </p>
                     </div>
-                    <div className="bg-white p-5 rounded-xl border border-slate-200">
-                      <span className="text-xs font-medium text-slate-500">{t('Đơn hàng & Khách hàng', 'Orders & Customers')}</span>
-                      <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-slate-900">
+                    <div className="bg-white p-3 sm:p-5 rounded-xl border border-slate-200">
+                      <span className="text-[11px] sm:text-xs font-medium text-slate-500">{t('Đơn hàng & TV', 'Orders & Users')}</span>
+                      <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums mt-0.5 sm:mt-1 text-slate-900">
                         {overview.metrics.totalOrders} {t('đơn', 'orders')}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1 tabular-nums">
-                        {overview.metrics.members} {t('thành viên', 'members')} · {overview.metrics.pointsIssued} {t('điểm đã cấp', 'pts')}
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 sm:mt-1 tabular-nums truncate">
+                        {overview.metrics.members} {t('TV', 'mbr')} · {overview.metrics.pointsIssued} {t('điểm', 'pts')}
                       </p>
                     </div>
-                    <div className="bg-white p-5 rounded-xl border border-slate-200">
-                      <span className="text-xs font-medium text-slate-500">{t('Kho Sản phẩm & Bài viết', 'Catalog & Posts')}</span>
-                      <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-slate-900">
+                    <div className="bg-white p-3 sm:p-5 rounded-xl border border-slate-200">
+                      <span className="text-[11px] sm:text-xs font-medium text-slate-500">{t('Sản phẩm & Bài', 'Catalog & Posts')}</span>
+                      <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums mt-0.5 sm:mt-1 text-slate-900">
                         {overview.metrics.products} SP · {overview.metrics.articles} {t('bài', 'posts')}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1 tabular-nums">
-                        {overview.metrics.mediaAssets} {t('ảnh tải lên thư viện', 'uploaded media')}
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 sm:mt-1 tabular-nums truncate">
+                        {overview.metrics.mediaAssets} {t('ảnh tải lên', 'media')}
                       </p>
                     </div>
-                    <div className="bg-white p-5 rounded-xl border border-slate-200">
-                      <span className="text-xs font-medium text-slate-500">{t('Yêu cầu Đối tác B2B', 'B2B Inquiries')}</span>
-                      <p className="text-2xl font-bold font-mono tabular-nums mt-1 text-slate-900">
+                    <div className="bg-white p-3 sm:p-5 rounded-xl border border-slate-200">
+                      <span className="text-[11px] sm:text-xs font-medium text-slate-500">{t('Yêu cầu B2B', 'B2B Leads')}</span>
+                      <p className="text-lg sm:text-2xl font-bold font-mono tabular-nums mt-0.5 sm:mt-1 text-slate-900">
                         {overview.metrics.b2bInquiries}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        {t('Gia công OEM, Xuất khẩu & HORECA', 'OEM, Export & HORECA leads')}
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 sm:mt-1 truncate">
+                        {t('OEM, Xuất khẩu & Sỉ', 'OEM & Export')}
                       </p>
                     </div>
                   </div>
 
                   {/* Performance + Audit Logs */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 space-y-3">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-6">
+                    <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200 space-y-2.5 sm:space-y-3 overflow-x-auto">
                       <h2 className="text-sm font-bold text-slate-900">
                         {t('Sản phẩm bán chạy theo doanh số', 'Top Selling Products')}
                       </h2>
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="text-left text-slate-500 border-b border-slate-100">
-                            <th className="py-2">{t('Mã SKU', 'SKU')}</th>
-                            <th className="py-2">{t('Tên sản phẩm', 'Product')}</th>
-                            <th className="py-2 text-right">{t('Số lượng', 'Units')}</th>
+                            <th className="py-2 pr-2">{t('SKU', 'SKU')}</th>
+                            <th className="py-2 pr-2">{t('Sản phẩm', 'Product')}</th>
+                            <th className="py-2 text-right">{t('SL', 'Qty')}</th>
                             <th className="py-2 text-right">{t('Doanh thu', 'Revenue')}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {(overview.productPerformance || []).map((row: any) => (
                             <tr key={row.sku}>
-                              <td className="py-2 font-mono text-[#00552B] font-semibold">{row.sku}</td>
-                              <td className="py-2">{lang === 'en' ? row.product_name_en : row.product_name_vi || row.product_name_en}</td>
+                              <td className="py-2 pr-2 font-mono text-[#00552B] font-semibold">{row.sku}</td>
+                              <td className="py-2 pr-2 truncate max-w-[140px] sm:max-w-none">{lang === 'en' ? row.product_name_en : row.product_name_vi || row.product_name_en}</td>
                               <td className="py-2 text-right tabular-nums">{row.units_sold}</td>
-                              <td className="py-2 text-right font-mono tabular-nums">{row.revenue.toLocaleString()} ₫</td>
+                              <td className="py-2 text-right font-mono tabular-nums whitespace-nowrap">{row.revenue.toLocaleString()} ₫</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
 
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 space-y-3">
+                    <div className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200 space-y-2.5 sm:space-y-3">
                       <h2 className="text-sm font-bold text-slate-900">{t('Nhật ký thao tác quản trị', 'System Activity Log')}</h2>
-                      <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 text-xs">
+                      <div className="max-h-60 sm:max-h-72 overflow-y-auto divide-y divide-slate-100 text-xs">
                         {(overview.auditLogs || []).map((log: any) => (
-                          <div key={log.id} className="py-2 flex justify-between gap-3">
+                          <div key={log.id} className="py-2 flex justify-between gap-2">
                             <div className="min-w-0">
                               <span className="font-mono font-semibold text-[#00552B]">{log.action}</span> · {log.entity_type} #{log.entity_id}
                               <p className="text-slate-500 truncate">{log.actor_email}</p>
                             </div>
-                            <span className="text-slate-400 font-mono text-[11px] shrink-0 tabular-nums">{log.created_at}</span>
+                            <span className="text-slate-400 font-mono text-[10px] sm:text-[11px] shrink-0 tabular-nums">{String(log.created_at || '').slice(5, 16)}</span>
                           </div>
                         ))}
                       </div>
@@ -1022,21 +1160,21 @@ export const AdminCmsPage: React.FC = () => {
 
           {/* 4. WOOCOMMERCE PRODUCTS (SẢN PHẨM) */}
           {resolvedSection === 'products' && hasAdminPermission(user, 'products') && (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {/* Filter & Add Product Bar */}
-              <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2.5 sm:gap-3">
+                <div className="flex items-center gap-1.5 text-xs overflow-x-auto pb-0.5 sm:pb-0 no-scrollbar">
                   {[
                     { id: 'all', label: `${t('Tất cả', 'All')} (${products.length})` },
                     { id: 'roasted', label: `${t('Rang xay', 'Roasted')} (${products.filter((p) => p.category === 'roasted').length})` },
                     { id: 'instant', label: `${t('Hòa tan', 'Instant')} (${products.filter((p) => p.category === 'instant').length})` },
-                    { id: 'green_bean', label: `${t('Nhân xanh B2B', 'Green Beans')} (${products.filter((p) => p.category === 'green_bean').length})` },
+                    { id: 'green_bean', label: `${t('Nhân xanh', 'Green')} (${products.filter((p) => p.category === 'green_bean').length})` },
                   ].map((tb) => (
                     <button
                       key={tb.id}
                       type="button"
                       onClick={() => setProdCatFilter(tb.id as any)}
-                      className={`px-3 py-1.5 rounded-lg font-semibold cursor-pointer ${
+                      className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap shrink-0 cursor-pointer ${
                         prodCatFilter === tb.id ? 'bg-[#00552B] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                       }`}
                     >
@@ -1046,14 +1184,14 @@ export const AdminCmsPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <div className="relative">
+                  <div className="relative flex-1 sm:flex-none">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       value={prodSearch}
                       onChange={(e) => setProdSearch(e.target.value)}
-                      placeholder={t('Tìm tên sản phẩm hoặc mã SKU...', 'Search name or SKU...')}
-                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-56"
+                      placeholder={t('Tìm tên sản phẩm hoặc SKU...', 'Search name or SKU...')}
+                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-full sm:w-56"
                     />
                   </div>
                   <button
@@ -1062,16 +1200,122 @@ export const AdminCmsPage: React.FC = () => {
                       setEditingProduct(null);
                       setProductModalOpen(true);
                     }}
-                    className="px-3.5 py-2 bg-[#00552B] hover:bg-[#003D25] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                    className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-[#00552B] hover:bg-[#003D25] text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    {t('Thêm sản phẩm mới', 'Add New Product')}
+                    {t('Thêm SP', 'Add New')}
                   </button>
                 </div>
               </div>
 
-              {/* WooCommerce Products Table */}
-              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              {/* Vietcombank Exchange Rate Sync Strip */}
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="min-w-0">
+                  <span className="font-bold text-[#003D25]">
+                    {t('Tỉ giá Vietcombank (VCB):', 'Vietcombank Rate (VCB):')}
+                  </span>{' '}
+                  <span className="font-mono font-bold text-[#00552B] tabular-nums">
+                    1 USD = {vcbRate.toLocaleString('vi-VN')} ₫
+                  </span>
+                  {vcbRateInfo?.bankDateTime && (
+                    <span className="text-[11px] text-slate-500 ml-2">({vcbRateInfo.bankDateTime})</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={syncingVcbCatalog}
+                  onClick={handleSyncCatalogVcbRates}
+                  className="px-3 py-1.5 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 text-[11px]"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingVcbCatalog ? 'animate-spin' : ''}`} />
+                  {syncingVcbCatalog
+                    ? t('Đang quy đổi USD...', 'Syncing VCB...')
+                    : t('Đồng bộ giá USD toàn bộ SP theo VCB', 'Sync All Products USD via VCB')}
+                </button>
+              </div>
+
+              {/* Mobile Compact Product Cards */}
+              <div className="md:hidden bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
+                {filteredProducts.map((p) => (
+                  <div key={p.id} className="p-3 space-y-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <img
+                        src={resolveMediaUrl(p.image_key)}
+                        alt={p.name_vi}
+                        className="w-11 aspect-[4/5] rounded-lg object-cover border border-slate-200 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingProduct(p);
+                            setProductModalOpen(true);
+                          }}
+                          className="font-bold text-slate-900 text-left line-clamp-1 cursor-pointer"
+                        >
+                          {lang === 'en' ? p.name_en : p.name_vi}
+                        </button>
+                        <p className="text-[11px] font-mono text-slate-500 truncate">
+                          {p.sku} · {CATEGORY_LABELS_VI[p.category] || p.category}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingProduct(p);
+                          setProductModalOpen(true);
+                        }}
+                        className="px-2.5 py-1 border border-slate-200 rounded-md font-semibold text-slate-700 shrink-0 cursor-pointer"
+                      >
+                        {t('Sửa', 'Edit')}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5 items-center">
+                      <div>
+                        <span className="block text-[10px] text-slate-400">{t('Giá (₫)', 'Price')}</span>
+                        <input
+                          type="number"
+                          defaultValue={p.price_vnd}
+                          onBlur={(e) => {
+                            const next = Number(e.target.value);
+                            if (next !== p.price_vnd) updateProductField(p.id, { price_vnd: next });
+                          }}
+                          className="w-full border border-slate-200 rounded px-2 py-1 font-mono tabular-nums text-[11px]"
+                        />
+                      </div>
+                      <div>
+                        <span className="block text-[10px] text-slate-400">{t('Kho', 'Stock')}</span>
+                        <input
+                          type="number"
+                          defaultValue={p.inventory}
+                          onBlur={(e) => {
+                            const next = Number(e.target.value);
+                            if (next !== p.inventory) updateProductField(p.id, { inventory: next });
+                          }}
+                          className="w-full border border-slate-200 rounded px-2 py-1 font-mono tabular-nums text-[11px]"
+                        />
+                      </div>
+                      <div>
+                        <span className="block text-[10px] text-slate-400">{t('Trạng thái', 'Status')}</span>
+                        <select
+                          value={p.status}
+                          onChange={(e) => updateProductField(p.id, { status: e.target.value })}
+                          className="w-full border border-slate-200 rounded px-1.5 py-1 bg-white text-[11px]"
+                        >
+                          {Object.entries(PRODUCT_STATUS_VI).map(([val, labelVi]) => (
+                            <option key={val} value={val}>
+                              {lang === 'en' ? val : labelVi}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop WooCommerce Products Table */}
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                     <tr>
@@ -1227,13 +1471,13 @@ export const AdminCmsPage: React.FC = () => {
 
           {/* 5. SHOPEE SELLER CENTER STYLE ORDERS (ĐƠN HÀNG & GIẢI QUYẾT ĐƠN) */}
           {resolvedSection === 'orders' && hasAdminPermission(user, 'orders') && (
-            <div className="space-y-4">
-              {/* Shopee-style Segmented Status Tabs */}
-              <div className="bg-white rounded-xl border border-slate-200 p-2 flex flex-wrap items-center gap-1.5 text-xs">
+            <div className="space-y-3 sm:space-y-4">
+              {/* Shopee-style Segmented Status Tabs (Single-row scroll on mobile) */}
+              <div className="bg-white rounded-xl border border-slate-200 p-1.5 sm:p-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar sm:flex-wrap text-xs">
                 <button
                   type="button"
                   onClick={() => setOrderStatusFilter('all')}
-                  className={`px-3.5 py-2 rounded-lg font-semibold transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                     orderStatusFilter === 'all'
                       ? 'bg-[#00552B] text-white'
                       : 'text-slate-600 hover:bg-slate-100'
@@ -1244,11 +1488,11 @@ export const AdminCmsPage: React.FC = () => {
                 {[
                   { id: 'Pending', vi: 'Chờ duyệt' },
                   { id: 'Confirmed', vi: 'Đã duyệt' },
-                  { id: 'Processing', vi: 'Đang đóng gói' },
+                  { id: 'Processing', vi: 'Đóng gói' },
                   { id: 'Shipping', vi: 'Đang giao' },
                   { id: 'Completed', vi: 'Hoàn thành' },
                   { id: 'Cancelled', vi: 'Đã hủy' },
-                  { id: 'Returned', vi: 'Trả hàng / Hoàn tiền' },
+                  { id: 'Returned', vi: 'Hoàn trả' },
                 ].map((tab) => {
                   const count = orders.filter((o) => o.order_status === tab.id).length;
                   const active = orderStatusFilter === tab.id;
@@ -1257,7 +1501,7 @@ export const AdminCmsPage: React.FC = () => {
                       key={tab.id}
                       type="button"
                       onClick={() => setOrderStatusFilter(tab.id)}
-                      className={`px-3.5 py-2 rounded-lg font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                      className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
                         active ? 'bg-[#00552B] text-white' : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >
@@ -1279,7 +1523,7 @@ export const AdminCmsPage: React.FC = () => {
               </div>
 
               {/* Search & Payment Filter Bar */}
-              <div className="bg-white rounded-xl border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-3.5 flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2.5 text-xs">
                 <div className="relative flex-1 min-w-[240px]">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -1604,7 +1848,65 @@ export const AdminCmsPage: React.FC = () => {
                 </form>
               )}
 
-              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Customer Cards */}
+              <div className="md:hidden bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
+                {customers.map((c) => (
+                  <div key={c.id} className="p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 truncate">{c.full_name}</p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {c.member_code} · {c.email}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0 font-mono tabular-nums">
+                        <span className="font-bold text-[#00552B] block">{c.points.available} pts</span>
+                        <span className="text-[10px] text-slate-500">{c.orderCount || 0} {t('đơn', 'ord')}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-1.5 pt-1">
+                      <select
+                        value={c.tier}
+                        onChange={(e) => adjustCustomer(c.id, e.target.value, 0)}
+                        className="border border-slate-200 rounded px-2 py-1 bg-white text-[11px]"
+                      >
+                        {[
+                          { val: 'ROAR Member', labelVi: 'Thành viên ROAR' },
+                          { val: 'ROAR Silver', labelVi: 'ROAR Bạc' },
+                          { val: 'ROAR Gold', labelVi: 'ROAR Vàng' },
+                          { val: 'ROAR Reserve', labelVi: 'ROAR Thượng Hạng' },
+                        ].map((tr) => (
+                          <option key={tr.val} value={tr.val}>
+                            {lang === 'en' ? tr.val : tr.labelVi}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => adjustCustomer(c.id, c.tier, 50)}
+                          className="px-2 py-1 bg-slate-100 rounded font-mono text-[11px] cursor-pointer"
+                        >
+                          +50
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNotifyCategory('promo');
+                            setNotifyModalTarget({ id: c.id, name: c.full_name, email: c.email });
+                          }}
+                          className="px-2.5 py-1 bg-[#00552B]/10 text-[#00552B] rounded font-semibold inline-flex items-center gap-1 text-[11px] cursor-pointer"
+                        >
+                          <Send className="w-3 h-3" />
+                          {t('Nhắn', 'Notify')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                     <tr>
@@ -1689,10 +1991,10 @@ export const AdminCmsPage: React.FC = () => {
 
           {/* 7. PROMOTIONS (KHUYẾN MÃI) */}
           {resolvedSection === 'promotions' && hasAdminPermission(user, 'promotions') && (
-            <div className="space-y-5">
+            <div className="space-y-3.5 sm:space-y-5">
               <form
                 onSubmit={createPromo}
-                className="bg-white p-5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-6 gap-3 text-xs items-end"
+                className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-6 gap-2.5 sm:gap-3 text-xs items-end"
               >
                 <div>
                   <label className="block text-slate-600 font-semibold mb-1">{t('Mã ưu đãi', 'Code')}</label>
@@ -1724,25 +2026,27 @@ export const AdminCmsPage: React.FC = () => {
                     className="w-full border border-slate-200 rounded-lg px-2.5 py-2"
                   />
                 </div>
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">{t('Mức giảm (%)', 'Discount %')}</label>
-                  <input
-                    type="number"
-                    required
-                    value={promoValue}
-                    onChange={(e) => setPromoValue(Number(e.target.value))}
-                    className="w-full border border-slate-200 rounded-lg px-2.5 py-2 font-mono tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">{t('Ngày kết thúc', 'End Date')}</label>
-                  <input
-                    type="date"
-                    required
-                    value={promoEnd}
-                    onChange={(e) => setPromoEnd(e.target.value)}
-                    className="w-full border border-slate-200 rounded-lg px-2.5 py-2"
-                  />
+                <div className="grid grid-cols-2 sm:contents gap-2">
+                  <div>
+                    <label className="block text-slate-600 font-semibold mb-1">{t('Mức giảm (%)', 'Discount %')}</label>
+                    <input
+                      type="number"
+                      required
+                      value={promoValue}
+                      onChange={(e) => setPromoValue(Number(e.target.value))}
+                      className="w-full border border-slate-200 rounded-lg px-2.5 py-2 font-mono tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-semibold mb-1">{t('Ngày kết thúc', 'End Date')}</label>
+                    <input
+                      type="date"
+                      required
+                      value={promoEnd}
+                      onChange={(e) => setPromoEnd(e.target.value)}
+                      className="w-full border border-slate-200 rounded-lg px-2.5 py-2"
+                    />
+                  </div>
                 </div>
                 <button type="submit" className="py-2 px-3 bg-[#00552B] text-white font-semibold rounded-lg cursor-pointer">
                   {t('+ Tạo mã ưu đãi', 'Create Promo')}
@@ -1763,7 +2067,39 @@ export const AdminCmsPage: React.FC = () => {
                 </label>
               </form>
 
-              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Promotions Cards */}
+              <div className="md:hidden bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
+                {promotions.map((pm) => (
+                  <div key={pm.id} className="p-3 flex items-center justify-between gap-2.5">
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-[#00552B]">{pm.code}</span>
+                        <span className="text-[10px] font-mono text-slate-400 tabular-nums">{pm.used_count}/{pm.usage_limit}</span>
+                      </div>
+                      <p className="font-semibold text-slate-900 truncate">{lang === 'en' ? pm.title_en : pm.title_vi}</p>
+                      <p className="text-[11px] font-mono text-slate-500 tabular-nums">{pm.start_date} → {pm.end_date}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await apiFetch(`/api/admin/promotions/${pm.id}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ active: !pm.active }),
+                        });
+                        loadAll();
+                      }}
+                      className={`px-2.5 py-1 rounded font-semibold shrink-0 cursor-pointer ${
+                        pm.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {pm.active ? t('Bật', 'On') : t('Tắt', 'Off')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                     <tr>
@@ -1809,45 +2145,74 @@ export const AdminCmsPage: React.FC = () => {
 
           {/* 8. B2B INQUIRIES (ĐỐI TÁC B2B) */}
           {resolvedSection === 'b2b' && hasAdminPermission(user, 'b2b') && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                  <tr>
-                    <th className="p-3 text-left">{t('Loại yêu cầu', 'Inquiry Type')}</th>
-                    <th className="p-3 text-left">{t('Doanh nghiệp / Liên hệ', 'Company / Contact')}</th>
-                    <th className="p-3 text-left">{t('Sản phẩm / Sản lượng', 'SKU / Volume')}</th>
-                    <th className="p-3 text-left">{t('Nội dung yêu cầu', 'Message')}</th>
-                    <th className="p-3 text-left">{t('Trạng thái xử lý', 'Status')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {inquiries.map((inq) => (
-                    <tr key={inq.id}>
-                      <td className="p-3 font-medium">{localizeB2BType(inq.inquiry_type, lang)}</td>
-                      <td className="p-3">
-                        <div className="font-semibold text-slate-900">{inq.company_name || inq.contact_name}</div>
-                        <div className="text-slate-500">{inq.email} · {inq.phone}</div>
-                      </td>
-                      <td className="p-3 font-mono">{inq.product_sku || '—'} · {inq.estimated_volume || '—'}</td>
-                      <td className="p-3 max-w-xs truncate">{inq.message}</td>
-                      <td className="p-3">
-                        <select
-                          value={inq.status}
-                          onChange={(e) => updateB2b(inq.id, e.target.value, inq.quoted_price || '')}
-                          className="border border-slate-200 rounded px-2 py-1 bg-white"
-                        >
-                          {Object.entries(B2B_STATUS_VI).map(([val, labelVi]) => (
-                            <option key={val} value={val}>
-                              {lang === 'en' ? val : labelVi}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
+            <>
+              <div className="md:hidden bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
+                {inquiries.map((inq) => (
+                  <div key={inq.id} className="p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 truncate">{inq.company_name || inq.contact_name}</p>
+                        <p className="text-[11px] text-[#00552B] font-medium">{localizeB2BType(inq.inquiry_type, lang)}</p>
+                        <p className="text-[11px] text-slate-500 truncate">{inq.email} · {inq.phone}</p>
+                      </div>
+                      <select
+                        value={inq.status}
+                        onChange={(e) => updateB2b(inq.id, e.target.value, inq.quoted_price || '')}
+                        className="border border-slate-200 rounded px-2 py-1 bg-white text-[11px] shrink-0"
+                      >
+                        {Object.entries(B2B_STATUS_VI).map(([val, labelVi]) => (
+                          <option key={val} value={val}>
+                            {lang === 'en' ? val : labelVi}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <p className="text-[11px] font-mono text-slate-600">{inq.product_sku || '—'} · {inq.estimated_volume || '—'}</p>
+                    {inq.message && <p className="text-[11px] text-slate-600 line-clamp-2">{inq.message}</p>}
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                    <tr>
+                      <th className="p-3 text-left">{t('Loại yêu cầu', 'Inquiry Type')}</th>
+                      <th className="p-3 text-left">{t('Doanh nghiệp / Liên hệ', 'Company / Contact')}</th>
+                      <th className="p-3 text-left">{t('Sản phẩm / Sản lượng', 'SKU / Volume')}</th>
+                      <th className="p-3 text-left">{t('Nội dung yêu cầu', 'Message')}</th>
+                      <th className="p-3 text-left">{t('Trạng thái xử lý', 'Status')}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {inquiries.map((inq) => (
+                      <tr key={inq.id}>
+                        <td className="p-3 font-medium">{localizeB2BType(inq.inquiry_type, lang)}</td>
+                        <td className="p-3">
+                          <div className="font-semibold text-slate-900">{inq.company_name || inq.contact_name}</div>
+                          <div className="text-slate-500">{inq.email} · {inq.phone}</div>
+                        </td>
+                        <td className="p-3 font-mono">{inq.product_sku || '—'} · {inq.estimated_volume || '—'}</td>
+                        <td className="p-3 max-w-xs truncate">{inq.message}</td>
+                        <td className="p-3">
+                          <select
+                            value={inq.status}
+                            onChange={(e) => updateB2b(inq.id, e.target.value, inq.quoted_price || '')}
+                            className="border border-slate-200 rounded px-2 py-1 bg-white"
+                          >
+                            {Object.entries(B2B_STATUS_VI).map(([val, labelVi]) => (
+                              <option key={val} value={val}>
+                                {lang === 'en' ? val : labelVi}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
 
           {/* 9. BRAND PERSONALITIES & ORIGINS */}
@@ -1923,83 +2288,160 @@ export const AdminCmsPage: React.FC = () => {
             </div>
           )}
 
-          {/* 10. SITE SETTINGS (CÀI ĐẶT WEBSITE) */}
+          {/* 10. SITE SETTINGS & GITHUB PORTABILITY SNAPSHOT */}
           {resolvedSection === 'settings' && hasAdminPermission(user, 'settings') && (
-            <form onSubmit={handleSaveSettings} className="bg-white p-6 rounded-xl border border-slate-200 max-w-3xl space-y-5 text-xs">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">{t('Cài đặt chung Website', 'General Site Settings')}</h2>
-                <p className="text-slate-500 mt-0.5">
-                  {t('Thông tin thương hiệu, email liên hệ và khẩu hiệu hiển thị trên toàn trang.', 'Global brand details, contact emails, and taglines across storefront.')}
-                </p>
-              </div>
+            <div className="space-y-4 sm:space-y-6 max-w-3xl text-xs">
+              <form onSubmit={handleSaveSettings} className="bg-white p-4 sm:p-6 rounded-xl border border-slate-200 space-y-4 sm:space-y-5">
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold text-slate-900">{t('Cài đặt chung Website', 'General Site Settings')}</h2>
+                  <p className="text-slate-500 mt-0.5">
+                    {t('Thông tin thương hiệu, email liên hệ và khẩu hiệu hiển thị trên toàn trang.', 'Global brand details, contact emails, and taglines across storefront.')}
+                  </p>
+                </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">{t('Email Chăm sóc khách hàng', 'Support Email')}</label>
-                  <input
-                    type="email"
-                    value={siteSettings.contact_email || ''}
-                    onChange={(e) => setSiteSettings({ ...siteSettings, contact_email: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Email Chăm sóc khách hàng', 'Support Email')}</label>
+                    <input
+                      type="email"
+                      value={siteSettings.contact_email || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, contact_email: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Email Hợp tác B2B & Xuất khẩu', 'B2B / Export Email')}</label>
+                    <input
+                      type="email"
+                      value={siteSettings.b2b_email || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, b2b_email: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Khẩu hiệu thương hiệu (Tiếng Việt)', 'Brand Tagline (VI)')}</label>
+                    <input
+                      type="text"
+                      value={siteSettings.tagline_vi || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, tagline_vi: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Khẩu hiệu thương hiệu (Tiếng Anh)', 'Brand Tagline (EN)')}</label>
+                    <input
+                      type="text"
+                      value={siteSettings.tagline_en || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, tagline_en: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Địa chỉ văn phòng / Xưởng rang (Tiếng Việt)', 'Office Address (VI)')}</label>
+                    <input
+                      type="text"
+                      value={siteSettings.office_address_vi || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, office_address_vi: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Địa chỉ văn phòng (Tiếng Anh)', 'Office Address (EN)')}</label>
+                    <input
+                      type="text"
+                      value={siteSettings.office_address_en || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, office_address_en: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">{t('Email Hợp tác B2B & Xuất khẩu', 'B2B / Export Email')}</label>
-                  <input
-                    type="email"
-                    value={siteSettings.b2b_email || ''}
-                    onChange={(e) => setSiteSettings({ ...siteSettings, b2b_email: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">{t('Khẩu hiệu thương hiệu (Tiếng Việt)', 'Brand Tagline (VI)')}</label>
-                  <input
-                    type="text"
-                    value={siteSettings.tagline_vi || ''}
-                    onChange={(e) => setSiteSettings({ ...siteSettings, tagline_vi: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">{t('Khẩu hiệu thương hiệu (Tiếng Anh)', 'Brand Tagline (EN)')}</label>
-                  <input
-                    type="text"
-                    value={siteSettings.tagline_en || ''}
-                    onChange={(e) => setSiteSettings({ ...siteSettings, tagline_en: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">{t('Địa chỉ văn phòng / Xưởng rang (Tiếng Việt)', 'Office Address (VI)')}</label>
-                  <input
-                    type="text"
-                    value={siteSettings.office_address_vi || ''}
-                    onChange={(e) => setSiteSettings({ ...siteSettings, office_address_vi: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">{t('Địa chỉ văn phòng (Tiếng Anh)', 'Office Address (EN)')}</label>
-                  <input
-                    type="text"
-                    value={siteSettings.office_address_en || ''}
-                    onChange={(e) => setSiteSettings({ ...siteSettings, office_address_en: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2"
-                  />
-                </div>
-              </div>
 
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="px-5 py-2.5 bg-[#00552B] hover:bg-[#003D25] text-white font-semibold rounded-lg cursor-pointer disabled:opacity-50"
-                >
-                  {savingSettings ? t('Đang lưu cài đặt...', 'Saving...') : t('Lưu thay đổi cài đặt', 'Save Settings')}
-                </button>
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-[#00552B] hover:bg-[#003D25] text-white font-semibold rounded-lg cursor-pointer disabled:opacity-50"
+                  >
+                    {savingSettings ? t('Đang lưu cài đặt...', 'Saving...') : t('Lưu thay đổi cài đặt', 'Save Settings')}
+                  </button>
+                </div>
+              </form>
+
+              {/* Portable GitHub Snapshot Backup & Sync Card */}
+              <div className="bg-white p-4 sm:p-6 rounded-xl border border-slate-200 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-[#00552B]/10 text-[#00552B] flex items-center justify-center shrink-0">
+                    <Database className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                      {t('Sao lưu & Đồng bộ Source GitHub (Snapshot JSON)', 'Portable Backup & GitHub Sync (JSON Snapshot)')}
+                    </h3>
+                    <p className="text-slate-500 mt-0.5 leading-relaxed">
+                      {t(
+                        'CSDL chạy chế độ Single-File (không tách file WAL) và tự động đồng bộ toàn bộ sản phẩm, 10 vùng trồng, 12 trang con, bài viết & hình ảnh ra JSON để tải về hoặc đẩy lên GitHub mà không mất dữ liệu.',
+                        'SQLite runs in single-file mode and auto-syncs all products, 10 origins, 12 subpages, posts & settings into portable JSON snapshots for GitHub clones and ZIP exports.'
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {snapshotSummary?.counts && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3 font-mono tabular-nums">
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">PRODUCTS</span>
+                      <span className="font-bold text-[#00552B]">{snapshotSummary.counts.products}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">ORIGINS</span>
+                      <span className="font-bold text-[#00552B]">{snapshotSummary.counts.origins}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">SUBPAGES</span>
+                      <span className="font-bold text-[#00552B]">{snapshotSummary.counts.cmsPages}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">POSTS / MEDIA</span>
+                      <span className="font-bold text-[#00552B]">{snapshotSummary.counts.articles} / {snapshotSummary.counts.mediaAssets}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    disabled={syncingSnapshot}
+                    onClick={handleSyncSnapshot}
+                    className="px-3.5 py-2.5 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncingSnapshot ? 'animate-spin' : ''}`} />
+                    {syncingSnapshot ? t('Đang đồng bộ...', 'Syncing...') : t('Đồng bộ Snapshot ngay', 'Sync Snapshot Now')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadSnapshot}
+                    className="px-3.5 py-2.5 rounded-lg border border-slate-300 hover:border-[#00552B] bg-white text-slate-800 font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#00552B]" />
+                    {t('Tải file Backup (.json)', 'Download Backup (.json)')}
+                  </button>
+                  <label className="px-3.5 py-2.5 rounded-lg border border-slate-300 hover:border-[#00552B] bg-slate-50 text-slate-800 font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5 text-[#00552B]" />
+                    {restoringSnapshot ? t('Đang khôi phục...', 'Restoring...') : t('Khôi phục từ JSON', 'Restore from JSON')}
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      disabled={restoringSnapshot}
+                      onChange={(e) => {
+                        handleUploadRestoreSnapshot(e.target.files?.[0]);
+                        e.target.value = '';
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </div>
-            </form>
+            </div>
           )}
 
           {/* 11. TEAM RBAC (PHÂN QUYỀN THÀNH VIÊN QUẢN TRỊ) */}
