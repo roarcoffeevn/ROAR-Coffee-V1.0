@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
-import { hashPassword } from './auth.ts';
+import { ALL_ADMIN_PERMISSIONS, ADMIN_ROLE_PRESETS, hashPassword } from './auth.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
@@ -316,6 +316,26 @@ export function initDatabase(): void {
       entity_id TEXT DEFAULT '',
       details_json TEXT DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS cms_pages (
+      slug TEXT PRIMARY KEY,
+      route_path TEXT NOT NULL,
+      group_name TEXT NOT NULL DEFAULT 'story',
+      eyebrow_vi TEXT NOT NULL DEFAULT '',
+      eyebrow_en TEXT NOT NULL DEFAULT '',
+      title_vi TEXT NOT NULL DEFAULT '',
+      title_en TEXT NOT NULL DEFAULT '',
+      subtitle_vi TEXT NOT NULL DEFAULT '',
+      subtitle_en TEXT NOT NULL DEFAULT '',
+      body_vi TEXT NOT NULL DEFAULT '',
+      body_en TEXT NOT NULL DEFAULT '',
+      hero_image_key TEXT NOT NULL DEFAULT '',
+      cta_label_vi TEXT NOT NULL DEFAULT '',
+      cta_label_en TEXT NOT NULL DEFAULT '',
+      cta_url TEXT NOT NULL DEFAULT '',
+      sections_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 
@@ -1983,5 +2003,410 @@ function runIncrementalMigrations(): void {
         1
       );
     }
+  }
+
+  // 6. Ensure users RBAC columns exist & configure Super Admin + sample staff editor
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (!userCols.some((c) => c.name === 'admin_role')) {
+    db.exec("ALTER TABLE users ADD COLUMN admin_role TEXT NOT NULL DEFAULT 'none'");
+  }
+  if (!userCols.some((c) => c.name === 'admin_permissions_json')) {
+    db.exec("ALTER TABLE users ADD COLUMN admin_permissions_json TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  db.prepare(`
+    UPDATE users
+    SET admin_role = 'super_admin', admin_permissions_json = ?
+    WHERE email = 'admin@roarcoffee.vn' AND role = 'admin'
+  `).run(JSON.stringify([...ALL_ADMIN_PERMISSIONS]));
+
+  db.prepare(`
+    UPDATE users
+    SET admin_role = 'super_admin', admin_permissions_json = ?
+    WHERE role = 'admin' AND (admin_role = 'none' OR admin_role = '')
+  `).run(JSON.stringify([...ALL_ADMIN_PERMISSIONS]));
+
+  const staffExists = db.prepare("SELECT id FROM users WHERE email = 'editor@roarcoffee.vn'").get();
+  if (!staffExists) {
+    db.prepare(`
+      INSERT INTO users (
+        email, password_hash, full_name, phone, role, admin_role, admin_permissions_json,
+        member_code, tier, email_verified
+      ) VALUES (?, ?, ?, ?, 'admin', 'content_editor', ?, ?, 'ROAR Gold', 1)
+    `).run(
+      'editor@roarcoffee.vn',
+      hashPassword('RoarEditor!2026'),
+      'Trần Thảo Vy (Biên tập CMS)',
+      '0908 456 789',
+      JSON.stringify(ADMIN_ROLE_PRESETS.content_editor),
+      'RC-ADM-0002'
+    );
+  }
+
+  // 7. Seed editable subpages (cms_pages) idempotently
+  const seedPages: Array<{
+    slug: string;
+    route_path: string;
+    group_name: string;
+    eyebrow_vi: string;
+    eyebrow_en: string;
+    title_vi: string;
+    title_en: string;
+    subtitle_vi: string;
+    subtitle_en: string;
+    body_vi: string;
+    body_en: string;
+    hero_image_key: string;
+    cta_label_vi: string;
+    cta_label_en: string;
+    cta_url: string;
+    sections: Array<{
+      tag_vi?: string;
+      tag_en?: string;
+      title_vi: string;
+      title_en: string;
+      body_vi: string;
+      body_en: string;
+    }>;
+  }> = [
+    {
+      slug: 'about',
+      route_path: '/about',
+      group_name: 'story',
+      eyebrow_vi: 'KHƠI BẢN LĨNH. ĐẬM CHẤT RIÊNG.',
+      eyebrow_en: 'IGNITING COURAGE. DEFINING CHARACTER.',
+      title_vi: 'Về Thương Hiệu ROAR COFFEE',
+      title_en: 'About ROAR COFFEE',
+      subtitle_vi: 'Thương hiệu cà phê Việt Nam kết nối di sản vùng trồng, kỷ luật nhân xanh và 7 cá tính đương đại.',
+      subtitle_en: 'A Vietnamese coffee house uniting highland terroir, green bean discipline, and seven modern brand personalities.',
+      body_vi: 'ROAR COFFEE là thương hiệu cà phê Việt Nam được xây dựng với tầm nhìn phát triển song hành thị trường nội địa và quốc tế. Chúng tôi kết nối di sản vùng trồng cà phê Việt Nam, kỷ luật tuyển chọn nhân xanh, tay nghề rang xay và 7 cá tính thương hiệu đương đại.',
+      body_en: 'ROAR COFFEE is a Vietnamese coffee brand built for both domestic resonance and international growth — uniting authentic Vietnamese coffee heritage, disciplined green bean grading, modern roast craft, and seven distinctive brand personalities.',
+      hero_image_key: 'hero_roar_coffee',
+      cta_label_vi: 'Xem bộ sưu tập 7 Cá Tính',
+      cta_label_en: 'Explore Seven Personalities',
+      cta_url: '/personalities',
+      sections: [
+        {
+          title_vi: 'Triết lý Nguồn gốc Minh bạch',
+          title_en: 'Transparent Origin Philosophy',
+          body_vi: 'Phân tách rõ ràng thông tin địa lý vùng cà phê Việt Nam với từng lô nguyên liệu được kiểm định chứng thư COA trước khi công bố.',
+          body_en: 'We clearly distinguish general Vietnamese coffee geography from verified sourcing lots and laboratory COA documentation.',
+        },
+        {
+          title_vi: 'Chuẩn mực Nhân xanh & Rang xay',
+          title_en: 'Green & Roast Discipline',
+          body_vi: 'Từ cấu hình 27 tổ hợp nhân xanh S14/S16/S18 (Natural, Honey, CBU) đến Robusta House Blend, Arabica Selection và Signature Reserve.',
+          body_en: 'From our 27-variant S14/S16/S18 green bean matrix (Natural, Honey, CBU) to Robusta House Blend, Arabica Selection, and Signature Reserve.',
+        },
+        {
+          title_vi: 'Khát vọng Vươn tầm Quốc tế',
+          title_en: 'International Ambition',
+          body_vi: 'Sẵn sàng đáp ứng tiêu chuẩn hợp tác B2B, HORECA, OEM / Private Label và xuất khẩu trên nền tảng thương mại số minh bạch.',
+          body_en: 'Engineered to serve domestic HORECA, wholesale partners, private-label OEM clients, and international green coffee buyers.',
+        },
+      ],
+    },
+    {
+      slug: 'origins',
+      route_path: '/origins',
+      group_name: 'story',
+      eyebrow_vi: 'KHÁM PHÁ VÙNG NGUYÊN LIỆU CÀ PHÊ VIỆT NAM',
+      eyebrow_en: 'DISCOVER THE ORIGINS OF VIETNAMESE COFFEE',
+      title_vi: 'Bản Đồ Vùng Nguyên Liệu & Địa Lý Cà Phê Việt Nam',
+      title_en: 'Vietnamese Coffee Origin Map',
+      subtitle_vi: 'Bao phủ 10 vùng trồng cà phê tiêu biểu từ Tây Bắc đến Tây Nguyên và Đông Nam Bộ.',
+      subtitle_en: 'Covering 10 authentic coffee regions from Northwest Vietnam to the Central Highlands and Southeast Vietnam.',
+      body_vi: 'Bao phủ 10 vùng trồng cà phê tiêu biểu từ Tây Bắc (Sơn La, Điện Biên), Bắc Trung Bộ (Nghệ An Phủ Quỳ, Quảng Trị Khe Sanh), Tây Nguyên (Kon Tum, Gia Lai, Đắk Lắk, Đắk Nông, Lâm Đồng) đến Đông Nam Bộ (Đồng Nai) trên lớp ảnh vệ tinh và địa hình thực tế.',
+      body_en: 'Covering 10 authentic coffee regions from Northwest Vietnam (Sơn La, Điện Biên), North Central Highlands & Khe Sanh (Nghệ An Phủ Quỳ, Quảng Trị), the Central Highlands (Kon Tum, Gia Lai, Đắk Lắk, Đắk Nông, Lâm Đồng) to Đồng Nai on real satellite and topographic imagery.',
+      hero_image_key: 'origin_central_highlands',
+      cta_label_vi: 'Xem Ma trận Nhân xanh',
+      cta_label_en: 'View Green Coffee Matrix',
+      cta_url: '/coffee/green-beans',
+      sections: [],
+    },
+    {
+      slug: 'farm-to-cup',
+      route_path: '/farm-to-cup',
+      group_name: 'story',
+      eyebrow_vi: 'Từ Nông Trại Đến Tách Cà Phê',
+      eyebrow_en: 'From Farm to Cup',
+      title_vi: '8 Giai Đoạn Tạo Nên Chuẩn Mực ROAR COFFEE',
+      title_en: 'Eight Stages of Coffee Craftsmanship',
+      subtitle_vi: 'Hành trình minh bạch từ canh tác đến chiết xuất.',
+      subtitle_en: 'A transparent craft pathway from farm cultivation to cup extraction.',
+      body_vi: 'Hành trình minh bạch từ vùng trồng Tây Nguyên, qua 3 phương pháp sơ chế Natural, Honey, CBU đến tách cà phê hoàn chỉnh.',
+      body_en: 'An educational journey from highland cultivation through Natural, Honey, and Washed (CBU) processing to final extraction.',
+      hero_image_key: 'origin_central_highlands',
+      cta_label_vi: 'Khám phá Cửa hàng Rang xay',
+      cta_label_en: 'Explore Roasted Shop',
+      cta_url: '/coffee/roasted',
+      sections: [
+        { title_vi: '01. Canh tác & Thổ nhưỡng', title_en: '01. Cultivation & Terroir', body_vi: 'Chăm sóc cây cà phê tại các vùng cao nguyên phù hợp về độ cao và đất đỏ bazan.', body_en: 'Stewardship across highland volcanic and limestone soils matched to Robusta and Arabica.' },
+        { title_vi: '02. Thu hái chọn lọc', title_en: '02. Selective Harvesting', body_vi: 'Ưu tiên thu hái quả chín đỏ đồng đều để tối ưu lượng đường tự nhiên.', body_en: 'Targeting ripe red cherries to maximize natural sugar development and clean cup potential.' },
+        { title_vi: '03. Sơ chế sau thu hoạch', title_en: '03. Post-Harvest Processing', body_vi: 'Thực hiện theo 3 phương pháp chuẩn hóa: Natural, Honey và Washed (CBU).', body_en: 'Processed via three disciplined methods: Natural, Honey, and Washed (CBU).' },
+        { title_vi: '04. Tuyển chọn nhân xanh', title_en: '04. Green Bean Selection', body_vi: 'Phân sàng kích thước S14, S16, S18 và kiểm tra độ ẩm, tỷ trọng, khuyết tật.', body_en: 'Screen graded across S14, S16, S18 with controlled moisture, density, and defect verification.' },
+        { title_vi: '05. Nghệ thuật Rang', title_en: '05. Precision Roasting', body_vi: 'Xây dựng biểu đồ nhiệt phù hợp cho từng dòng Robusta, Arabica hay Signature Reserve.', body_en: 'Tailored roast curves calibrated separately for Robusta, Arabica, Culi, and Reserve blends.' },
+        { title_vi: '06. Xay theo phương pháp pha', title_en: '06. Precision Grinding', body_vi: 'Cỡ xay tương thích từ Phin thô-vừa đến Espresso mịn và Pour-over đồng nhất.', body_en: 'Particle distribution matched precisely to Phin, Espresso, Pour-over, French Press, or Cold Brew.' },
+        { title_vi: '07. Chiết xuất & Pha chế', title_en: '07. Brewing & Extraction', body_vi: 'Kiểm soát nhiệt độ nước 90–94°C, tỷ lệ bột/nước và thời gian ủ nở.', body_en: 'Controlled water chemistry, 90–94°C thermal stability, bloom timing, and extraction yield.' },
+        { title_vi: '08. Thưởng thức bản lĩnh', title_en: '08. Sensory Enjoyment', body_vi: 'Trải nghiệm trọn vẹn hương vị và dấu ấn cá tính riêng trong từng tách cà phê.', body_en: 'Experiencing authentic Vietnamese coffee character in daily rituals and curated tastings.' },
+      ],
+    },
+    {
+      slug: 'brewing',
+      route_path: '/brewing',
+      group_name: 'story',
+      eyebrow_vi: 'Công thức tham chiếu Barista',
+      eyebrow_en: 'Reference Brewing Recipes',
+      title_vi: 'Hướng Dẫn Pha Chế ROAR COFFEE',
+      title_en: 'ROAR COFFEE Brewing Guide',
+      subtitle_vi: 'Phin Việt Nam · Espresso · Pour-over · French Press · Cold Brew',
+      subtitle_en: 'Vietnamese Phin · Espresso · Pour-over · French Press · Cold Brew',
+      body_vi: 'Các thông số dưới đây là công thức tham chiếu chuẩn mực, có thể tinh chỉnh theo khẩu vị và lô rang thực tế.',
+      body_en: 'Reference recipes engineered as reliable starting points — adjustable for your roast lot and personal palate.',
+      hero_image_key: 'product_robusta_house',
+      cta_label_vi: 'Chọn cà phê theo gu pha',
+      cta_label_en: 'Shop Coffee by Brew Method',
+      cta_url: '/shop',
+      sections: [],
+    },
+    {
+      slug: 'signature-reserve',
+      route_path: '/signature-reserve',
+      group_name: 'story',
+      eyebrow_vi: 'Phiên Bản Báo Đen · 60% Robusta · 20% Culi · 20% Arabica',
+      eyebrow_en: 'Black Panther Edition · 60% Robusta · 20% Culi · 20% Arabica',
+      title_vi: 'ROAR COFFEE SIGNATURE RESERVE',
+      title_en: 'ROAR COFFEE SIGNATURE RESERVE',
+      subtitle_vi: 'Tuyệt phẩm Báo Đen · Đen huyền & Vàng Champagne',
+      subtitle_en: 'Black Panther Flagship · Obsidian Black & Champagne Gold',
+      body_vi: 'Phiên bản đỉnh cao của ROAR COFFEE trong diện mạo đen huyền và vàng champagne. Kết hợp sức mạnh của 60% Robusta, độ đậm đặc của 20% Culi và nét thanh lịch của 20% Arabica với thành phần nhân xanh CBU chỉ định.',
+      body_en: 'The pinnacle of ROAR COFFEE in obsidian black and champagne gold — harmonizing 60% Robusta, 20% Culi, and 20% Arabica with specified CBU green coffee ingredients.',
+      hero_image_key: 'product_signature_reserve',
+      cta_label_vi: 'Đặt mua Signature Reserve',
+      cta_label_en: 'Acquire Signature Reserve',
+      cta_url: '/product/signature-reserve',
+      sections: [
+        {
+          title_vi: '01. Tuyển Ngôn Báo Đen',
+          title_en: '01. The Black Panther Ethos',
+          body_vi: 'Quý hiếm, bí ẩn, tinh tế và khác biệt. Signature Reserve ra đời cho những khoảnh khắc thưởng thức đòi hỏi chiều sâu và bản sắc riêng.',
+          body_en: 'Exclusivity, mystery, sophistication, and distinction. Signature Reserve is conceived for moments that call for composed presence.',
+        },
+        {
+          title_vi: '02. Cấu Trúc Phối Trộn Xác Thực',
+          title_en: '02. Approved Blend Architecture',
+          body_vi: '60% Robusta · 20% Culi · 20% Arabica kết hợp nguyên liệu nhân xanh CBU theo chỉ định kỹ thuật của ROAR COFFEE.',
+          body_en: '60% Robusta · 20% Culi · 20% Arabica incorporating specified CBU washed green coffee ingredients.',
+        },
+        {
+          title_vi: '03. Quà Tặng Doanh Nghiệp & Đóng Gói Cao Cấp',
+          title_en: '03. Executive & Corporate Gifting',
+          body_vi: 'Hộp thiếc đen nhám 250g, hộp quà cứng 500g và bộ quà tặng doanh nghiệp ánh vàng champagne tùy biến theo số lượng đặt hàng.',
+          body_en: '250g matte obsidian canisters, 500g presentation boxes, and bespoke corporate gift sets finished in champagne gold.',
+        },
+      ],
+    },
+    {
+      slug: 'farm-membership',
+      route_path: '/farm-membership',
+      group_name: 'story',
+      eyebrow_vi: 'Định hướng tương lai · Đề xuất phát triển (Sắp ra mắt)',
+      eyebrow_en: 'Future Concept · Proposed Community Program',
+      title_vi: 'Trang Trại ROAR & Cộng Đồng Thành Viên',
+      title_en: 'ROAR Coffee Farm & Membership Concept',
+      subtitle_vi: 'Chương trình trải nghiệm giáo dục canh tác bền vững',
+      subtitle_en: 'Experiential coffee cultivation & origin education community',
+      body_vi: 'Không gian kết nối giáo dục canh tác cà phê bền vững, cập nhật mùa vụ, trải nghiệm tham quan nông trại đối tác và câu chuyện người trồng cà phê. Chương trình này là định hướng cộng đồng trải nghiệm — không phải mô hình sở hữu trang trại, cam kết lợi nhuận hay chia sẻ cổ phần.',
+      body_en: 'A future-ready community concept dedicated to coffee cultivation education, seasonal harvest dispatches, curated farm visits, and grower storytelling. This initiative is strictly educational and experiential — it does not offer farm ownership, investment returns, or profit sharing.',
+      hero_image_key: 'origin_central_highlands',
+      cta_label_vi: 'Tìm hiểu hạng Thành viên',
+      cta_label_en: 'Explore Membership Tiers',
+      cta_url: '/account',
+      sections: [
+        {
+          tag_vi: 'Sắp ra mắt / Đề xuất',
+          tag_en: 'Proposed / Coming Soon',
+          title_vi: 'Giáo dục Canh tác & Sơ chế',
+          title_en: 'Cultivation & Processing Education',
+          body_vi: 'Tìm hiểu vòng đời cây cà phê từ mùa hoa trắng Tây Nguyên đến thu hoạch và phơi Natural, Honey, CBU.',
+          body_en: 'Follow the coffee lifecycle from Central Highlands blossom through selective harvest and Natural, Honey, and CBU drying.',
+        },
+        {
+          tag_vi: 'Sắp ra mắt / Đề xuất',
+          tag_en: 'Proposed / Coming Soon',
+          title_vi: 'Nhật ký Mùa vụ (Đề xuất)',
+          title_en: 'Seasonal Harvest Updates (Proposed)',
+          body_vi: 'Cập nhật tiến độ thu hái theo từng vùng nguyên liệu hợp tác khi chương trình chính thức vận hành.',
+          body_en: 'Scheduled harvest dispatches across verified partner localities once the program launches.',
+        },
+        {
+          tag_vi: 'Sắp ra mắt / Đề xuất',
+          tag_en: 'Proposed / Coming Soon',
+          title_vi: 'Trải nghiệm Nông trại & Cupping',
+          title_en: 'Farm Experiences & Cupping',
+          body_vi: 'Lịch tham quan và thử nếm dành cho thành viên ROAR Gold & ROAR Reserve (Sắp ra mắt).',
+          body_en: 'Curated origin visits and member cupping sessions planned for future ROAR Gold & Reserve cohorts.',
+        },
+      ],
+    },
+    {
+      slug: 'partners',
+      route_path: '/partners',
+      group_name: 'b2b',
+      eyebrow_vi: 'Cổng Thương Mại B2B & Phân Phối',
+      eyebrow_en: 'B2B Wholesale & Distribution Portal',
+      title_vi: 'Hợp Tác Kinh Doanh Cùng ROAR COFFEE',
+      title_en: 'Partner with ROAR COFFEE',
+      subtitle_vi: 'Hai hành trình thương mại chuyên biệt cho Rang xay HORECA và Nhân xanh B2B.',
+      subtitle_en: 'Two dedicated commercial channels for Roasted Wholesale and Commercial Green Coffee.',
+      body_vi: 'Thiết kế hai hành trình thương mại chuyên biệt cho đối tác Cà phê Rang xay (HORECA, Quán cà phê, Nhà phân phối, Siêu thị) và đối tác Cà phê Nhân xanh (Nhà rang, Nhà sản xuất, Đơn vị xuất nhập khẩu).',
+      body_en: 'Two distinct commercial pathways tailored separately for Roasted Coffee buyers (HORECA, cafes, retailers, distributors) and Green Coffee buyers (roasters, manufacturers, importers, and traders).',
+      hero_image_key: 'b2b_green_trade',
+      cta_label_vi: 'Mở Ma trận Nhân xanh 27 SKUs',
+      cta_label_en: 'Open Green Bean Matrix',
+      cta_url: '/coffee/green-beans',
+      sections: [
+        {
+          title_vi: 'Hành trình 01 · Bán sỉ Cà phê Rang xay & HORECA',
+          title_en: 'Journey 01 · Roasted Coffee Wholesale & HORECA',
+          body_vi: 'Dành cho chuỗi quán cà phê, nhà hàng, khách sạn, văn phòng và nhà bán lẻ tìm nguồn cung Robusta House Blend, Arabica Selection, Đậm, Phin, Espresso Gold và Signature Reserve.',
+          body_en: 'Built for coffee shops, hotels, restaurants, supermarkets, and distributors seeking Robusta House Blend, Arabica Selection, Espresso Gold, or Signature Reserve.',
+          tag_vi: 'Đăng ký tài khoản đối tác & xác minh doanh nghiệp\nBảng giá sỉ theo sản lượng định kỳ\nGửi mẫu thử rang xay & hỗ trợ công thức pha chế',
+          tag_en: 'Partner registration & business verification\nVolume-based partner pricing tiers\nSample kits & barista recipe calibration',
+        },
+        {
+          title_vi: 'Hành trình 02 · Thương mại Cà phê Nhân xanh B2B',
+          title_en: 'Journey 02 · Commercial Green Coffee Trading',
+          body_vi: 'Dành cho xưởng rang, nhà sản xuất cà phê hòa tan và đơn vị thương mại cần Robusta, Arabica, Culi cỡ sàng S14/S16/S18 (Natural, Honey, CBU) đóng bao 30kg, 60kg, 69kg hoặc Big Bag 1.000kg.',
+          body_en: 'Engineered for commercial roasters, industrial buyers, and importers sourcing Robusta, Arabica, and Culi across S14/S16/S18 (Natural, Honey, CBU) in 30kg, 60kg, 69kg, or 1,000kg Big Bags.',
+          tag_vi: '27 tổ hợp cấu hình chuẩn hóa theo mã SKU\nYêu cầu mẫu xanh đánh giá thử nếm trước hợp đồng\nĐơn hàng số lượng lớn, Container & Hợp đồng dài hạn',
+          tag_en: '27-SKU standardized grading architecture\nPre-contract green sample evaluation\nBulk, container-load, and contract quotations',
+        },
+      ],
+    },
+    {
+      slug: 'oem-export',
+      route_path: '/oem-export',
+      group_name: 'b2b',
+      eyebrow_vi: 'Gia công OEM · Nhãn hiệu riêng · Xuất khẩu',
+      eyebrow_en: 'OEM · Private Label · Export',
+      title_vi: 'Dịch Vụ Gia Công OEM, Nhãn Hiệu Riêng & Xuất Khẩu',
+      title_en: 'OEM, Private Label & International Export',
+      subtitle_vi: 'Giải pháp phát triển nhãn hiệu cà phê trọn gói từ nhân xanh đến đóng gói xuất khẩu.',
+      subtitle_en: 'End-to-end private label coffee manufacturing and export coordination.',
+      body_vi: 'Hỗ trợ đối tác quốc tế và thương hiệu nội địa từ khâu tìm nguồn nhân xanh, phát triển hồ sơ rang, đóng gói theo yêu cầu đến phối hợp chứng từ xuất khẩu khi được xác thực.',
+      body_en: 'Supporting international importers and private-label brands across green sourcing, roast profiling, custom packaging, MOQ planning, and verified export documentation support.',
+      hero_image_key: 'b2b_green_trade',
+      cta_label_vi: 'Xem Danh mục Bán sỉ',
+      cta_label_en: 'View Wholesale Catalog',
+      cta_url: '/partners',
+      sections: [
+        { title_vi: 'Tìm nguồn Nhân xanh', title_en: 'Green Coffee Sourcing', body_vi: 'Triển khai linh hoạt theo MOQ và thông số kỹ thuật đã thống nhất.', body_en: 'Configured per agreed MOQ and verified project specifications.' },
+        { title_vi: 'Gia công Rang chuẩn hóa', title_en: 'Contract Roasting', body_vi: 'Xây dựng biểu đồ nhiệt riêng theo khẩu vị thị trường mục tiêu.', body_en: 'Custom roast profiling tailored to regional flavor preferences.' },
+        { title_vi: 'Đóng gói Private Label', title_en: 'Private Label Packaging', body_vi: 'Túi van một chiều, hộp thiếc cao cấp hoặc bao lớn theo thiết kế đối tác.', body_en: 'One-way valve pouches, obsidian canisters, or bulk bags under your label.' },
+        { title_vi: 'Hỗ trợ Chứng từ Xuất khẩu', title_en: 'Export Documentation Support', body_vi: 'Phối hợp CO, kiểm dịch thực vật và hồ sơ kỹ thuật theo Incoterms.', body_en: 'Documentation coordination aligned with verified shipment Incoterms.' },
+      ],
+    },
+    {
+      slug: 'contact',
+      route_path: '/contact',
+      group_name: 'b2b',
+      eyebrow_vi: 'Liên hệ',
+      eyebrow_en: 'Contact',
+      title_vi: 'Kết Nối Với ROAR COFFEE',
+      title_en: 'Connect with ROAR COFFEE',
+      subtitle_vi: 'Hỗ trợ khách hàng bán lẻ, tư vấn HORECA, OEM và thương mại nhân xanh.',
+      subtitle_en: 'Direct support for retail customers, HORECA, OEM, and green coffee inquiries.',
+      body_vi: 'Đội ngũ ROAR COFFEE sẵn sàng phản hồi mọi yêu cầu về sản phẩm rang xay, mẫu thử nhân xanh B2B, quà tặng doanh nghiệp và hợp tác phân phối.',
+      body_en: 'Our retail concierge and B2B export team respond promptly to product, sample kit, corporate gifting, and wholesale inquiries.',
+      hero_image_key: 'hero_roar_coffee',
+      cta_label_vi: 'Xem Yêu cầu Đối tác B2B',
+      cta_label_en: 'Explore B2B Portal',
+      cta_url: '/partners',
+      sections: [],
+    },
+    {
+      slug: 'privacy',
+      route_path: '/privacy',
+      group_name: 'legal',
+      eyebrow_vi: 'Pháp lý & Tuân thủ',
+      eyebrow_en: 'Legal & Compliance',
+      title_vi: 'Chính sách Bảo mật',
+      title_en: 'Privacy Policy',
+      subtitle_vi: 'Quy định bảo vệ dữ liệu cá nhân và quyền riêng tư thành viên ROAR COFFEE.',
+      subtitle_en: 'Member personal data protection and privacy governance.',
+      body_vi: 'Tài liệu chính sách pháp lý và quy định thương mại chính thức của ROAR COFFEE được cập nhật và rà soát đầy đủ trước khi vận hành thương mại chính thức.\n\nTài khoản thành viên có quyền chỉnh sửa thông tin, quản lý tùy chọn thông báo và gửi yêu cầu xóa tài khoản trực tiếp tại trang Tài khoản cá nhân.',
+      body_en: 'Official ROAR COFFEE legal policies and commercial terms are structured for compliance and finalized prior to commercial launch.\n\nRegistered members may update personal profiles, adjust communication preferences, and submit account deletion requests directly from their Account portal.',
+      hero_image_key: '',
+      cta_label_vi: 'Quản lý Tài khoản & Quyền riêng tư',
+      cta_label_en: 'Manage Account Privacy',
+      cta_url: '/account',
+      sections: [],
+    },
+    {
+      slug: 'terms',
+      route_path: '/terms',
+      group_name: 'legal',
+      eyebrow_vi: 'Pháp lý & Tuân thủ',
+      eyebrow_en: 'Legal & Compliance',
+      title_vi: 'Điều khoản Sử dụng',
+      title_en: 'Terms & Conditions',
+      subtitle_vi: 'Điều khoản giao dịch thương mại và sử dụng website ROAR COFFEE.',
+      subtitle_en: 'Commercial terms and platform usage conditions.',
+      body_vi: 'Tài liệu chính sách pháp lý và quy định thương mại chính thức của ROAR COFFEE được cập nhật và rà soát đầy đủ trước khi vận hành thương mại chính thức.\n\nMọi thông tin thông số kỹ thuật, niên vụ và giá bán tham chiếu tuân thủ quy trình xác thực dữ liệu của ROAR COFFEE.',
+      body_en: 'Official ROAR COFFEE legal policies and commercial terms are structured for compliance and finalized prior to commercial launch.\n\nAll product specifications, harvest details, and promotional terms remain governed by verified ROAR COFFEE commercial schedules.',
+      hero_image_key: '',
+      cta_label_vi: 'Liên hệ Pháp lý & CSKH',
+      cta_label_en: 'Contact Support',
+      cta_url: '/contact',
+      sections: [],
+    },
+    {
+      slug: 'shipping',
+      route_path: '/shipping',
+      group_name: 'legal',
+      eyebrow_vi: 'Pháp lý & Tuân thủ',
+      eyebrow_en: 'Legal & Compliance',
+      title_vi: 'Chính sách Giao hàng & Đổi trả',
+      title_en: 'Shipping & Returns',
+      subtitle_vi: 'Quy định vận chuyển bán lẻ toàn quốc và điều kiện giao nhận B2B.',
+      subtitle_en: 'Domestic retail shipping and commercial B2B delivery terms.',
+      body_vi: 'Tài liệu chính sách pháp lý và quy định thương mại chính thức của ROAR COFFEE được cập nhật và rà soát đầy đủ trước khi vận hành thương mại chính thức.\n\nĐơn hàng bán lẻ được áp dụng vận chuyển tiêu chuẩn toàn quốc. Đơn hàng cà phê nhân xanh B2B áp dụng giao nhận theo điều kiện thương mại thống nhất (EXW / FOB / CIF).',
+      body_en: 'Official ROAR COFFEE legal policies and commercial terms are structured for compliance and finalized prior to commercial launch.\n\nRetail orders ship via standard domestic couriers. B2B green coffee orders follow agreed commercial Incoterms and packaging specifications.',
+      hero_image_key: '',
+      cta_label_vi: 'Tra cứu Đơn hàng',
+      cta_label_en: 'Track Order',
+      cta_url: '/orders/track',
+      sections: [],
+    },
+  ];
+
+  const insertPage = db.prepare(`
+    INSERT OR IGNORE INTO cms_pages (
+      slug, route_path, group_name, eyebrow_vi, eyebrow_en, title_vi, title_en,
+      subtitle_vi, subtitle_en, body_vi, body_en, hero_image_key,
+      cta_label_vi, cta_label_en, cta_url, sections_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const p of seedPages) {
+    insertPage.run(
+      p.slug,
+      p.route_path,
+      p.group_name,
+      p.eyebrow_vi,
+      p.eyebrow_en,
+      p.title_vi,
+      p.title_en,
+      p.subtitle_vi,
+      p.subtitle_en,
+      p.body_vi,
+      p.body_en,
+      p.hero_image_key,
+      p.cta_label_vi,
+      p.cta_label_en,
+      p.cta_url,
+      JSON.stringify(p.sections)
+    );
   }
 }

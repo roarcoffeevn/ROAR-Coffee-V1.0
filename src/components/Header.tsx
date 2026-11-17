@@ -180,22 +180,26 @@ export const Header: React.FC = () => {
           </div>
         </div>
 
-        {/* Mobile Compact Header (320px–430px & tablet) */}
-        <div className="lg:hidden flex items-center justify-between h-[58px] px-3">
+        {/* Mobile Compact Header (320px–430px & tablet) with centered vertical logo */}
+        <div className="lg:hidden relative flex items-center justify-between h-[64px] px-2.5 sm:px-4">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
             aria-label={t('Mở menu điều hướng', 'Open navigation menu')}
-            className="w-10 h-10 flex items-center justify-center text-[#202020] dark:text-[#F1EFEA] cursor-pointer"
+            className="w-10 h-10 flex items-center justify-center text-[#202020] dark:text-[#F1EFEA] cursor-pointer shrink-0 z-10"
           >
             <Menu className="w-5 h-5" />
           </button>
 
-          <Link to={localePath('/')} onClick={closeAll} className="flex items-center justify-center">
-            <AdaptiveLogo variant="horizontal" surface={theme === 'dark' ? 'dark' : 'light'} size="xs" />
+          <Link
+            to={localePath('/')}
+            onClick={closeAll}
+            className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center py-1"
+          >
+            <AdaptiveLogo variant="vertical" surface={theme === 'dark' ? 'dark' : 'light'} size="xs" />
           </Link>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0 z-10">
             <button
               type="button"
               onClick={toggleTheme}

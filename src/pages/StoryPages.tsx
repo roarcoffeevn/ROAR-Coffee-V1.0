@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, BookOpen, Check, Clock, Flame, Thermometer } from 'lucide-react';
+import { BookOpen, Clock, Thermometer } from 'lucide-react';
 import { AdaptiveLogo } from '../components/AdaptiveLogo';
+import { AdminPageEditLink } from '../components/AdminPageEditBar';
 import { B2BInquiryModal } from '../components/B2BInquiryModal';
 import { MediaImage } from '../components/MediaImage';
 import { VietnamOriginMap } from '../components/VietnamOriginMap';
@@ -9,22 +10,38 @@ import { useI18n } from '../i18n/I18nContext';
 import { useStore } from '../context/StoreContext';
 
 export const OriginsPage: React.FC = () => {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
+  const { cmsPages } = useStore();
+  const page = cmsPages['origins'];
+
+  const eyebrow =
+    (lang === 'vi' ? page?.eyebrow_vi : page?.eyebrow_en) ||
+    t('KHÁM PHÁ VÙNG NGUYÊN LIỆU CÀ PHÊ VIỆT NAM', 'DISCOVER THE ORIGINS OF VIETNAMESE COFFEE');
+  const title =
+    (lang === 'vi' ? page?.title_vi : page?.title_en) ||
+    t('Bản Đồ Vùng Nguyên Liệu & Địa Lý Cà Phê Việt Nam', 'Vietnamese Coffee Origin Map');
+  const body =
+    (lang === 'vi' ? page?.body_vi : page?.body_en) ||
+    t(
+      'Bao phủ 10 vùng trồng cà phê tiêu biểu từ Tây Bắc (Sơn La, Điện Biên), Bắc Trung Bộ (Nghệ An Phủ Quỳ, Quảng Trị Khe Sanh), Tây Nguyên (Kon Tum, Gia Lai, Đắk Lắk, Đắk Nông, Lâm Đồng) đến Đông Nam Bộ (Đồng Nai) trên lớp ảnh vệ tinh và địa hình thực tế.',
+      'Covering 10 authentic coffee regions from Northwest Vietnam (Sơn La, Điện Biên), North Central Highlands & Khe Sanh (Nghệ An Phủ Quỳ, Quảng Trị), the Central Highlands (Kon Tum, Gia Lai, Đắk Lắk, Đắk Nông, Lâm Đồng) to Đồng Nai on real satellite and topographic imagery.'
+    );
+
   return (
     <div className="max-w-[1280px] mx-auto px-6 py-14 space-y-8">
-      <div className="max-w-3xl space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
-          {t('KHÁM PHÁ VÙNG NGUYÊN LIỆU CÀ PHÊ VIỆT NAM', 'DISCOVER THE ORIGINS OF VIETNAMESE COFFEE')}
-        </p>
-        <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
-          {t('Bản Đồ Vùng Nguyên Liệu & Địa Lý Cà Phê Việt Nam', 'Vietnamese Coffee Origin Map')}
-        </h1>
-        <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">
-          {t(
-            'Bao phủ 10 vùng trồng cà phê tiêu biểu từ Tây Bắc (Sơn La, Điện Biên), Bắc Trung Bộ (Nghệ An Phủ Quỳ, Quảng Trị Khe Sanh), Tây Nguyên (Kon Tum, Gia Lai, Đắk Lắk, Đắk Nông, Lâm Đồng) đến Đông Nam Bộ (Đồng Nai) trên lớp ảnh vệ tinh và địa hình thực tế.',
-            'Covering 10 authentic coffee regions from Northwest Vietnam (Sơn La, Điện Biên), North Central Highlands & Khe Sanh (Nghệ An Phủ Quỳ, Quảng Trị), the Central Highlands (Kon Tum, Gia Lai, Đắk Lắk, Đắk Nông, Lâm Đồng) to Đồng Nai on real satellite and topographic imagery.'
-          )}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
+            {eyebrow}
+          </p>
+          <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
+            {title}
+          </h1>
+          <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">
+            {body}
+          </p>
+        </div>
+        <AdminPageEditLink slug="origins" />
       </div>
       <VietnamOriginMap />
     </div>
@@ -32,19 +49,23 @@ export const OriginsPage: React.FC = () => {
 };
 
 export const FarmToCupPage: React.FC = () => {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
+  const { cmsPages } = useStore();
   const [activeTopic, setActiveTopic] = useState(0);
+  const page = cmsPages['farm-to-cup'];
 
-  const stages = [
-    { vi: '01. Canh tác & Thổ nhưỡng', en: '01. Cultivation & Terroir', descVi: 'Chăm sóc cây cà phê tại các vùng cao nguyên phù hợp về độ cao và đất đỏ bazan.', descEn: 'Stewardship across highland volcanic and limestone soils matched to Robusta and Arabica.' },
-    { vi: '02. Thu hái chọn lọc', en: '02. Selective Harvesting', descVi: 'Ưu tiên thu hái quả chín đỏ đồng đều để tối ưu lượng đường tự nhiên.', descEn: 'Targeting ripe red cherries to maximize natural sugar development and clean cup potential.' },
-    { vi: '03. Sơ chế sau thu hoạch', en: '03. Post-Harvest Processing', descVi: 'Thực hiện theo 3 phương pháp chuẩn hóa: Natural, Honey và Washed (CBU).', descEn: 'Processed via three disciplined methods: Natural, Honey, and Washed (CBU).' },
-    { vi: '04. Tuyển chọn nhân xanh', en: '04. Green Bean Selection', descVi: 'Phân sàng kích thước S14, S16, S18 và kiểm tra độ ẩm, tỷ trọng, khuyết tật.', descEn: 'Screen graded across S14, S16, S18 with controlled moisture, density, and defect verification.' },
-    { vi: '05. Nghệ thuật Rang', en: '05. Precision Roasting', descVi: 'Xây dựng biểu đồ nhiệt phù hợp cho từng dòng Robusta, Arabica hay Signature Reserve.', descEn: 'Tailored roast curves calibrated separately for Robusta, Arabica, Culi, and Reserve blends.' },
-    { vi: '06. Xay theo phương pháp pha', en: '06. Precision Grinding', descVi: 'Cỡ xay tương thích từ Phin thô-vừa đến Espresso mịn và Pour-over đồng nhất.', descEn: 'Particle distribution matched precisely to Phin, Espresso, Pour-over, French Press, or Cold Brew.' },
-    { vi: '07. Chiết xuất & Pha chế', en: '07. Brewing & Extraction', descVi: 'Kiểm soát nhiệt độ nước 90–94°C, tỷ lệ bột/nước và thời gian ủ nở.', descEn: 'Controlled water chemistry, 90–94°C thermal stability, bloom timing, and extraction yield.' },
-    { vi: '08. Thưởng thức bản lĩnh', en: '08. Sensory Enjoyment', descVi: 'Trải nghiệm trọn vẹn hương vị và dấu ấn cá tính riêng trong từng tách cà phê.', descEn: 'Experiencing authentic Vietnamese coffee character in daily rituals and curated tastings.' },
+  const fallbackStages = [
+    { title_vi: '01. Canh tác & Thổ nhưỡng', title_en: '01. Cultivation & Terroir', body_vi: 'Chăm sóc cây cà phê tại các vùng cao nguyên phù hợp về độ cao và đất đỏ bazan.', body_en: 'Stewardship across highland volcanic and limestone soils matched to Robusta and Arabica.' },
+    { title_vi: '02. Thu hái chọn lọc', title_en: '02. Selective Harvesting', body_vi: 'Ưu tiên thu hái quả chín đỏ đồng đều để tối ưu lượng đường tự nhiên.', body_en: 'Targeting ripe red cherries to maximize natural sugar development and clean cup potential.' },
+    { title_vi: '03. Sơ chế sau thu hoạch', title_en: '03. Post-Harvest Processing', body_vi: 'Thực hiện theo 3 phương pháp chuẩn hóa: Natural, Honey và Washed (CBU).', body_en: 'Processed via three disciplined methods: Natural, Honey, and Washed (CBU).' },
+    { title_vi: '04. Tuyển chọn nhân xanh', title_en: '04. Green Bean Selection', body_vi: 'Phân sàng kích thước S14, S16, S18 và kiểm tra độ ẩm, tỷ trọng, khuyết tật.', body_en: 'Screen graded across S14, S16, S18 with controlled moisture, density, and defect verification.' },
+    { title_vi: '05. Nghệ thuật Rang', title_en: '05. Precision Roasting', body_vi: 'Xây dựng biểu đồ nhiệt phù hợp cho từng dòng Robusta, Arabica hay Signature Reserve.', body_en: 'Tailored roast curves calibrated separately for Robusta, Arabica, Culi, and Reserve blends.' },
+    { title_vi: '06. Xay theo phương pháp pha', title_en: '06. Precision Grinding', body_vi: 'Cỡ xay tương thích từ Phin thô-vừa đến Espresso mịn và Pour-over đồng nhất.', body_en: 'Particle distribution matched precisely to Phin, Espresso, Pour-over, French Press, or Cold Brew.' },
+    { title_vi: '07. Chiết xuất & Pha chế', title_en: '07. Brewing & Extraction', body_vi: 'Kiểm soát nhiệt độ nước 90–94°C, tỷ lệ bột/nước và thời gian ủ nở.', body_en: 'Controlled water chemistry, 90–94°C thermal stability, bloom timing, and extraction yield.' },
+    { title_vi: '08. Thưởng thức bản lĩnh', title_en: '08. Sensory Enjoyment', body_vi: 'Trải nghiệm trọn vẹn hương vị và dấu ấn cá tính riêng trong từng tách cà phê.', body_en: 'Experiencing authentic Vietnamese coffee character in daily rituals and curated tastings.' },
   ];
+
+  const stages = page?.sections?.length ? page.sections : fallbackStages;
 
   const topics = [
     { id: 'natural', vi: 'Chế biến Khô (Natural)', en: 'Natural Process', bodyVi: 'Quả cà phê chín được phơi nguyên quả trên giàn hoặc sân phơi sạch, đảo đều để giữ vị ngọt đậm và thể chất dày.', bodyEn: 'Whole ripe cherries are dried intact on raised beds or clean patios, producing full body and concentrated fruit sweetness.' },
@@ -56,33 +77,50 @@ export const FarmToCupPage: React.FC = () => {
     { id: 'storage', vi: 'Bảo quản Cà phê', en: 'Coffee Storage', bodyVi: 'Bảo quản nhân xanh trong bao chuyên dụng thoáng khí kiểm soát ẩm; cà phê rang dùng bao bì van một chiều tránh ánh sáng.', bodyEn: 'Green beans rest in moisture-controlled storage; roasted lots ship in one-way valve barriers away from heat and light.' },
   ];
 
+  const eyebrow =
+    (lang === 'vi' ? page?.eyebrow_vi : page?.eyebrow_en) ||
+    t('Từ Nông Trại Đến Tách Cà Phê', 'From Farm to Cup');
+  const title =
+    (lang === 'vi' ? page?.title_vi : page?.title_en) ||
+    t('8 Giai Đoạn Tạo Nên Chuẩn Mực ROAR COFFEE', 'Eight Stages of Coffee Craftsmanship');
+  const body =
+    (lang === 'vi' ? page?.body_vi : page?.body_en) ||
+    t(
+      'Hành trình minh bạch từ vùng trồng Tây Nguyên, qua 3 phương pháp sơ chế Natural, Honey, CBU đến tách cà phê hoàn chỉnh.',
+      'An educational journey from highland cultivation through Natural, Honey, and Washed (CBU) processing to final extraction.'
+    );
+
   return (
     <div className="max-w-[1280px] mx-auto px-6 py-14 space-y-14">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
         <div className="lg:col-span-6 space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
-            {t('Từ Nông Trại Đến Tách Cà Phê', 'From Farm to Cup')}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
+              {eyebrow}
+            </p>
+            <AdminPageEditLink slug="farm-to-cup" />
+          </div>
           <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
-            {t('8 Giai Đoạn Tạo Nên Chuẩn Mực ROAR COFFEE', 'Eight Stages of Coffee Craftsmanship')}
+            {title}
           </h1>
           <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">
-            {t(
-              'Hành trình minh bạch từ vùng trồng Tây Nguyên, qua 3 phương pháp sơ chế Natural, Honey, CBU đến tách cà phê hoàn chỉnh.',
-              'An educational journey from highland cultivation through Natural, Honey, and Washed (CBU) processing to final extraction.'
-            )}
+            {body}
           </p>
         </div>
         <div className="lg:col-span-6 aspect-[16/9] rounded-xl overflow-hidden border border-[#202020]/10 dark:border-white/10">
-          <MediaImage imageKey="origin_central_highlands" alt="Vietnamese coffee highlands" className="w-full h-full object-cover" />
+          <MediaImage
+            imageKey={page?.hero_image_key || 'origin_central_highlands'}
+            alt="Vietnamese coffee highlands"
+            className="w-full h-full object-cover"
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {stages.map((s) => (
-          <div key={s.en} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-5 space-y-2">
-            <h2 className="text-base font-bold text-[#00552B] dark:text-[#C6A667]">{t(s.vi, s.en)}</h2>
-            <p className="text-xs text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">{t(s.descVi, s.descEn)}</p>
+        {stages.map((s, idx) => (
+          <div key={`${s.title_en}-${idx}`} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-5 space-y-2">
+            <h2 className="text-base font-bold text-[#00552B] dark:text-[#C6A667]">{lang === 'vi' ? s.title_vi : s.title_en}</h2>
+            <p className="text-xs text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">{lang === 'vi' ? s.body_vi : s.body_en}</p>
           </div>
         ))}
       </div>
@@ -113,9 +151,11 @@ export const FarmToCupPage: React.FC = () => {
 };
 
 export const BrewingGuidePage: React.FC = () => {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
+  const { cmsPages } = useStore();
   const [servings, setServings] = useState(1);
   const [methodIdx, setMethodIdx] = useState(0);
+  const page = cmsPages['brewing'];
 
   const recipes = [
     {
@@ -239,22 +279,34 @@ export const BrewingGuidePage: React.FC = () => {
   ];
 
   const active = recipes[methodIdx];
+  const eyebrow =
+    (lang === 'vi' ? page?.eyebrow_vi : page?.eyebrow_en) ||
+    t('Công thức tham chiếu Barista', 'Reference Brewing Recipes');
+  const title =
+    (lang === 'vi' ? page?.title_vi : page?.title_en) ||
+    t('Hướng Dẫn Pha Chế ROAR COFFEE', 'ROAR COFFEE Brewing Guide');
+  const body =
+    (lang === 'vi' ? page?.body_vi : page?.body_en) ||
+    t(
+      'Các thông số dưới đây là công thức tham chiếu chuẩn mực, có thể tinh chỉnh theo khẩu vị và lô rang thực tế.',
+      'Reference recipes engineered as reliable starting points — adjustable for your roast lot and personal palate.'
+    );
 
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-14 space-y-10">
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
-          {t('Công thức tham chiếu Barista', 'Reference Brewing Recipes')}
-        </p>
-        <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
-          {t('Hướng Dẫn Pha Chế ROAR COFFEE', 'ROAR COFFEE Brewing Guide')}
-        </h1>
-        <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75">
-          {t(
-            'Các thông số dưới đây là công thức tham chiếu chuẩn mực, có thể tinh chỉnh theo khẩu vị và lô rang thực tế.',
-            'Reference recipes engineered as reliable starting points — adjustable for your roast lot and personal palate.'
-          )}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2 max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
+            {eyebrow}
+          </p>
+          <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
+            {title}
+          </h1>
+          <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75">
+            {body}
+          </p>
+        </div>
+        <AdminPageEditLink slug="brewing" />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -335,13 +387,61 @@ export const BrewingGuidePage: React.FC = () => {
           <span>{t(active.troubleVi, active.troubleEn)}</span>
         </div>
       </div>
+
+      {page?.sections && page.sections.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {page.sections.map((sec, idx) => (
+            <div key={idx} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-5 space-y-2">
+              <h3 className="text-base font-bold text-[#00552B] dark:text-[#C6A667]">{lang === 'vi' ? sec.title_vi : sec.title_en}</h3>
+              <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">{lang === 'vi' ? sec.body_vi : sec.body_en}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
 
 export const AboutPage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
-  const { theme } = useStore();
+  const { theme, cmsPages } = useStore();
+  const page = cmsPages['about'];
+
+  const fallbackCards = [
+    {
+      title_vi: 'Triết lý Nguồn gốc Minh bạch',
+      title_en: 'Transparent Origin Philosophy',
+      body_vi: 'Phân tách rõ ràng thông tin địa lý vùng cà phê Việt Nam với từng lô nguyên liệu được kiểm định chứng thư COA trước khi công bố.',
+      body_en: 'We clearly distinguish general Vietnamese coffee geography from verified sourcing lots and laboratory COA documentation.',
+    },
+    {
+      title_vi: 'Chuẩn mực Nhân xanh & Rang xay',
+      title_en: 'Green & Roast Discipline',
+      body_vi: 'Từ cấu hình 27 tổ hợp nhân xanh S14/S16/S18 (Natural, Honey, CBU) đến Robusta House Blend, Arabica Selection và Signature Reserve.',
+      body_en: 'From our 27-variant S14/S16/S18 green bean matrix (Natural, Honey, CBU) to Robusta House Blend, Arabica Selection, and Signature Reserve.',
+    },
+    {
+      title_vi: 'Khát vọng Vươn tầm Quốc tế',
+      title_en: 'International Ambition',
+      body_vi: 'Sẵn sàng đáp ứng tiêu chuẩn hợp tác B2B, HORECA, OEM / Private Label và xuất khẩu trên nền tảng thương mại số minh bạch.',
+      body_en: 'Engineered to serve domestic HORECA, wholesale partners, private-label OEM clients, and international green coffee buyers.',
+    },
+  ];
+
+  const cards = page?.sections?.length ? page.sections : fallbackCards;
+  const eyebrow =
+    (lang === 'vi' ? page?.eyebrow_vi : page?.eyebrow_en) ||
+    (lang === 'vi' ? 'KHƠI BẢN LĨNH. ĐẬM CHẤT RIÊNG.' : 'IGNITING COURAGE. DEFINING CHARACTER.');
+  const title =
+    (lang === 'vi' ? page?.title_vi : page?.title_en) ||
+    t('Về Thương Hiệu ROAR COFFEE', 'About ROAR COFFEE');
+  const body =
+    (lang === 'vi' ? page?.body_vi : page?.body_en) ||
+    t(
+      'ROAR COFFEE là thương hiệu cà phê Việt Nam được xây dựng với tầm nhìn phát triển song hành thị trường nội địa và quốc tế. Chúng tôi kết nối di sản vùng trồng cà phê Việt Nam, kỷ luật tuyển chọn nhân xanh, tay nghề rang xay và 7 cá tính thương hiệu đương đại.',
+      'ROAR COFFEE is a Vietnamese coffee brand built for both domestic resonance and international growth — uniting authentic Vietnamese coffee heritage, disciplined green bean grading, modern roast craft, and seven distinctive brand personalities.'
+    );
+
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-14 space-y-12">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
@@ -349,45 +449,26 @@ export const AboutPage: React.FC = () => {
           <AdaptiveLogo variant="vertical" surface={theme === 'dark' ? 'dark' : 'light'} size="lg" />
         </div>
         <div className="lg:col-span-7 space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
-            {lang === 'vi' ? 'KHƠI BẢN LĨNH. ĐẬM CHẤT RIÊNG.' : 'IGNITING COURAGE. DEFINING CHARACTER.'}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
+              {eyebrow}
+            </p>
+            <AdminPageEditLink slug="about" />
+          </div>
           <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
-            {t('Về Thương Hiệu ROAR COFFEE', 'About ROAR COFFEE')}
+            {title}
           </h1>
-          <p className="text-base text-[#202020]/80 dark:text-[#F1EFEA]/80 leading-relaxed">
-            {t(
-              'ROAR COFFEE là thương hiệu cà phê Việt Nam được xây dựng với tầm nhìn phát triển song hành thị trường nội địa và quốc tế. Chúng tôi kết nối di sản vùng trồng cà phê Việt Nam, kỷ luật tuyển chọn nhân xanh, tay nghề rang xay và 7 cá tính thương hiệu đương đại.',
-              'ROAR COFFEE is a Vietnamese coffee brand built for both domestic resonance and international growth — uniting authentic Vietnamese coffee heritage, disciplined green bean grading, modern roast craft, and seven distinctive brand personalities.'
-            )}
+          <p className="text-base text-[#202020]/80 dark:text-[#F1EFEA]/80 leading-relaxed whitespace-pre-line">
+            {body}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[
-          {
-            titleVi: 'Triết lý Nguồn gốc Minh bạch',
-            titleEn: 'Transparent Origin Philosophy',
-            bodyVi: 'Phân tách rõ ràng thông tin địa lý vùng cà phê Việt Nam với từng lô nguyên liệu được kiểm định chứng thư COA trước khi công bố.',
-            bodyEn: 'We clearly distinguish general Vietnamese coffee geography from verified sourcing lots and laboratory COA documentation.',
-          },
-          {
-            titleVi: 'Chuẩn mực Nhân xanh & Rang xay',
-            titleEn: 'Green & Roast Discipline',
-            bodyVi: 'Từ cấu hình 27 tổ hợp nhân xanh S14/S16/S18 (Natural, Honey, CBU) đến Robusta House Blend, Arabica Selection và Signature Reserve.',
-            bodyEn: 'From our 27-variant S14/S16/S18 green bean matrix (Natural, Honey, CBU) to Robusta House Blend, Arabica Selection, and Signature Reserve.',
-          },
-          {
-            titleVi: 'Khát vọng Vươn tầm Quốc tế',
-            titleEn: 'International Ambition',
-            bodyVi: 'Sẵn sàng đáp ứng tiêu chuẩn hợp tác B2B, HORECA, OEM / Private Label và xuất khẩu trên nền tảng thương mại số minh bạch.',
-            bodyEn: 'Engineered to serve domestic HORECA, wholesale partners, private-label OEM clients, and international green coffee buyers.',
-          },
-        ].map((card) => (
-          <div key={card.titleEn} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-2.5">
-            <h2 className="text-lg font-bold text-[#00552B] dark:text-[#C6A667]">{t(card.titleVi, card.titleEn)}</h2>
-            <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">{t(card.bodyVi, card.bodyEn)}</p>
+        {cards.map((card, idx) => (
+          <div key={`${card.title_en}-${idx}`} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-2.5">
+            <h2 className="text-lg font-bold text-[#00552B] dark:text-[#C6A667]">{lang === 'vi' ? card.title_vi : card.title_en}</h2>
+            <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">{lang === 'vi' ? card.body_vi : card.body_en}</p>
           </div>
         ))}
       </div>
@@ -397,8 +478,8 @@ export const AboutPage: React.FC = () => {
           <h3 className="text-xl font-bold">{t('Khám phá 7 Cá Tính Thương Hiệu', 'Discover the Seven Brand Personalities')}</h3>
           <p className="text-sm text-[#F8F5EF]/75">{t('Hổ · Sư tử · Cáo · Đại bàng · Sói · Cú mèo · Báo đen', 'Tiger · Lion · Fox · Eagle · Wolf · Owl · Black Panther')}</p>
         </div>
-        <Link to={localePath('/personalities')} className="px-6 py-3 bg-[#C6A667] text-[#111111] text-sm font-semibold rounded whitespace-nowrap">
-          {t('Xem bộ sưu tập 7 Cá Tính', 'Explore Seven Personalities')}
+        <Link to={localePath(page?.cta_url || '/personalities')} className="px-6 py-3 bg-[#C6A667] text-[#111111] text-sm font-semibold rounded whitespace-nowrap">
+          {(lang === 'vi' ? page?.cta_label_vi : page?.cta_label_en) || t('Xem bộ sưu tập 7 Cá Tính', 'Explore Seven Personalities')}
         </Link>
       </div>
     </div>
@@ -406,50 +487,66 @@ export const AboutPage: React.FC = () => {
 };
 
 export const SignatureReservePage: React.FC = () => {
-  const { t, localePath } = useI18n();
+  const { lang, t, localePath } = useI18n();
+  const { cmsPages } = useStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [bookletPage, setBookletPage] = useState(0);
+  const page = cmsPages['signature-reserve'];
 
-  const bookletSlides = [
+  const fallbackSlides = [
     {
-      titleVi: '01. Tuyển Ngôn Báo Đen',
-      titleEn: '01. The Black Panther Ethos',
-      bodyVi: 'Quý hiếm, bí ẩn, tinh tế và khác biệt. Signature Reserve ra đời cho những khoảnh khắc thưởng thức đòi hỏi chiều sâu và bản sắc riêng.',
-      bodyEn: 'Exclusivity, mystery, sophistication, and distinction. Signature Reserve is conceived for moments that call for composed presence.',
+      title_vi: '01. Tuyển Ngôn Báo Đen',
+      title_en: '01. The Black Panther Ethos',
+      body_vi: 'Quý hiếm, bí ẩn, tinh tế và khác biệt. Signature Reserve ra đời cho những khoảnh khắc thưởng thức đòi hỏi chiều sâu và bản sắc riêng.',
+      body_en: 'Exclusivity, mystery, sophistication, and distinction. Signature Reserve is conceived for moments that call for composed presence.',
     },
     {
-      titleVi: '02. Cấu Trúc Phối Trộn Xác Thực',
-      titleEn: '02. Approved Blend Architecture',
-      bodyVi: '60% Robusta · 20% Culi · 20% Arabica kết hợp nguyên liệu nhân xanh CBU theo chỉ định kỹ thuật của ROAR COFFEE.',
-      bodyEn: '60% Robusta · 20% Culi · 20% Arabica incorporating specified CBU washed green coffee ingredients.',
+      title_vi: '02. Cấu Trúc Phối Trộn Xác Thực',
+      title_en: '02. Approved Blend Architecture',
+      body_vi: '60% Robusta · 20% Culi · 20% Arabica kết hợp nguyên liệu nhân xanh CBU theo chỉ định kỹ thuật của ROAR COFFEE.',
+      body_en: '60% Robusta · 20% Culi · 20% Arabica incorporating specified CBU washed green coffee ingredients.',
     },
     {
-      titleVi: '03. Quà Tặng Doanh Nghiệp & Đóng Gói Cao Cấp',
-      titleEn: '03. Executive & Corporate Gifting',
-      bodyVi: 'Hộp thiếc đen nhám 250g, hộp quà cứng 500g và bộ quà tặng doanh nghiệp ánh vàng champagne tùy biến theo số lượng đặt hàng.',
-      bodyEn: '250g matte obsidian canisters, 500g presentation boxes, and bespoke corporate gift sets finished in champagne gold.',
+      title_vi: '03. Quà Tặng Doanh Nghiệp & Đóng Gói Cao Cấp',
+      title_en: '03. Executive & Corporate Gifting',
+      body_vi: 'Hộp thiếc đen nhám 250g, hộp quà cứng 500g và bộ quà tặng doanh nghiệp ánh vàng champagne tùy biến theo số lượng đặt hàng.',
+      body_en: '250g matte obsidian canisters, 500g presentation boxes, and bespoke corporate gift sets finished in champagne gold.',
     },
   ];
+
+  const bookletSlides = page?.sections?.length ? page.sections : fallbackSlides;
+  const safeIdx = Math.min(bookletPage, bookletSlides.length - 1);
+
+  const eyebrow =
+    (lang === 'vi' ? page?.eyebrow_vi : page?.eyebrow_en) ||
+    t('Phiên Bản Báo Đen · 60% Robusta · 20% Culi · 20% Arabica', 'Black Panther Edition · 60% Robusta · 20% Culi · 20% Arabica');
+  const title = (lang === 'vi' ? page?.title_vi : page?.title_en) || 'ROAR COFFEE SIGNATURE RESERVE';
+  const body =
+    (lang === 'vi' ? page?.body_vi : page?.body_en) ||
+    t(
+      'Phiên bản đỉnh cao của ROAR COFFEE trong diện mạo đen huyền và vàng champagne. Kết hợp sức mạnh của 60% Robusta, độ đậm đặc của 20% Culi và nét thanh lịch của 20% Arabica với thành phần nhân xanh CBU chỉ định.',
+      'The pinnacle of ROAR COFFEE in obsidian black and champagne gold — harmonizing 60% Robusta, 20% Culi, and 20% Arabica with specified CBU green coffee ingredients.'
+    );
 
   return (
     <div className="bg-[#0B0B0B] text-[#F8F5EF]">
       <section className="max-w-[1280px] mx-auto px-6 py-16 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
         <div className="lg:col-span-6 space-y-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#C6A667]">
-            {t('Phiên Bản Báo Đen · 60% Robusta · 20% Culi · 20% Arabica', 'Black Panther Edition · 60% Robusta · 20% Culi · 20% Arabica')}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#C6A667]">
+              {eyebrow}
+            </p>
+            <AdminPageEditLink slug="signature-reserve" dark />
+          </div>
           <h1 className="text-4xl sm:text-5xl font-bold text-white leading-tight">
-            ROAR COFFEE SIGNATURE RESERVE
+            {title}
           </h1>
-          <p className="text-base text-[#F8F5EF]/80 leading-relaxed">
-            {t(
-              'Phiên bản đỉnh cao của ROAR COFFEE trong diện mạo đen huyền và vàng champagne. Kết hợp sức mạnh của 60% Robusta, độ đậm đặc của 20% Culi và nét thanh lịch của 20% Arabica với thành phần nhân xanh CBU chỉ định.',
-              'The pinnacle of ROAR COFFEE in obsidian black and champagne gold — harmonizing 60% Robusta, 20% Culi, and 20% Arabica with specified CBU green coffee ingredients.'
-            )}
+          <p className="text-base text-[#F8F5EF]/80 leading-relaxed whitespace-pre-line">
+            {body}
           </p>
           <div className="flex flex-wrap gap-3">
-            <Link to={localePath('/product/signature-reserve')} className="px-6 py-3 bg-[#C6A667] text-[#111111] text-sm font-semibold rounded hover:bg-[#d4b67a]">
-              {t('Đặt mua Signature Reserve', 'Acquire Signature Reserve')}
+            <Link to={localePath(page?.cta_url || '/product/signature-reserve')} className="px-6 py-3 bg-[#C6A667] text-[#111111] text-sm font-semibold rounded hover:bg-[#d4b67a]">
+              {(lang === 'vi' ? page?.cta_label_vi : page?.cta_label_en) || t('Đặt mua Signature Reserve', 'Acquire Signature Reserve')}
             </Link>
             <button
               type="button"
@@ -463,7 +560,7 @@ export const SignatureReservePage: React.FC = () => {
 
         <div className="lg:col-span-6 grid grid-cols-2 gap-4">
           <div className="aspect-[4/3] rounded-xl overflow-hidden border border-[#C6A667]/30 col-span-2">
-            <MediaImage imageKey="product_signature_reserve" alt="Signature Reserve packaging" className="w-full h-full object-cover" />
+            <MediaImage imageKey={page?.hero_image_key || 'product_signature_reserve'} alt="Signature Reserve packaging" className="w-full h-full object-cover" />
           </div>
           <div className="aspect-square rounded-xl overflow-hidden border border-[#C6A667]/30">
             <MediaImage imageKey="mascot_panther" alt="Black Panther Emblem" className="w-full h-full object-cover" />
@@ -494,7 +591,7 @@ export const SignatureReservePage: React.FC = () => {
                   type="button"
                   onClick={() => setBookletPage(idx)}
                   className={`w-8 h-8 rounded text-xs font-mono cursor-pointer ${
-                    bookletPage === idx ? 'bg-[#C6A667] text-[#111111] font-bold' : 'bg-white/10 text-white'
+                    safeIdx === idx ? 'bg-[#C6A667] text-[#111111] font-bold' : 'bg-white/10 text-white'
                   }`}
                 >
                   0{idx + 1}
@@ -504,8 +601,12 @@ export const SignatureReservePage: React.FC = () => {
           </div>
 
           <div className="bg-[#141414] border border-[#C6A667]/25 rounded-2xl p-8 space-y-3">
-            <h2 className="text-2xl font-bold text-white">{t(bookletSlides[bookletPage].titleVi, bookletSlides[bookletPage].titleEn)}</h2>
-            <p className="text-base text-[#F8F5EF]/80 leading-relaxed">{t(bookletSlides[bookletPage].bodyVi, bookletSlides[bookletPage].bodyEn)}</p>
+            <h2 className="text-2xl font-bold text-white">
+              {lang === 'vi' ? bookletSlides[safeIdx].title_vi : bookletSlides[safeIdx].title_en}
+            </h2>
+            <p className="text-base text-[#F8F5EF]/80 leading-relaxed">
+              {lang === 'vi' ? bookletSlides[safeIdx].body_vi : bookletSlides[safeIdx].body_en}
+            </p>
           </div>
         </div>
       </section>
@@ -522,49 +623,76 @@ export const SignatureReservePage: React.FC = () => {
 };
 
 export const FarmMembershipPage: React.FC = () => {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
+  const { cmsPages } = useStore();
+  const page = cmsPages['farm-membership'];
+
+  const fallbackItems = [
+    {
+      tag_vi: 'Sắp ra mắt / Đề xuất',
+      tag_en: 'Proposed / Coming Soon',
+      title_vi: 'Giáo dục Canh tác & Sơ chế',
+      title_en: 'Cultivation & Processing Education',
+      body_vi: 'Tìm hiểu vòng đời cây cà phê từ mùa hoa trắng Tây Nguyên đến thu hoạch và phơi Natural, Honey, CBU.',
+      body_en: 'Follow the coffee lifecycle from Central Highlands blossom through selective harvest and Natural, Honey, and CBU drying.',
+    },
+    {
+      tag_vi: 'Sắp ra mắt / Đề xuất',
+      tag_en: 'Proposed / Coming Soon',
+      title_vi: 'Nhật ký Mùa vụ (Đề xuất)',
+      title_en: 'Seasonal Harvest Updates (Proposed)',
+      body_vi: 'Cập nhật tiến độ thu hái theo từng vùng nguyên liệu hợp tác khi chương trình chính thức vận hành.',
+      body_en: 'Scheduled harvest dispatches across verified partner localities once the program launches.',
+    },
+    {
+      tag_vi: 'Sắp ra mắt / Đề xuất',
+      tag_en: 'Proposed / Coming Soon',
+      title_vi: 'Trải nghiệm Nông trại & Cupping',
+      title_en: 'Farm Experiences & Cupping',
+      body_vi: 'Lịch tham quan và thử nếm dành cho thành viên ROAR Gold & ROAR Reserve (Sắp ra mắt).',
+      body_en: 'Curated origin visits and member cupping sessions planned for future ROAR Gold & Reserve cohorts.',
+    },
+  ];
+
+  const items = page?.sections?.length ? page.sections : fallbackItems;
+  const eyebrow =
+    (lang === 'vi' ? page?.eyebrow_vi : page?.eyebrow_en) ||
+    t('Định hướng tương lai · Đề xuất phát triển (Sắp ra mắt)', 'Future Concept · Proposed Community Program');
+  const title =
+    (lang === 'vi' ? page?.title_vi : page?.title_en) ||
+    t('Trang Trại ROAR & Cộng Đồng Thành Viên', 'ROAR Coffee Farm & Membership Concept');
+  const body =
+    (lang === 'vi' ? page?.body_vi : page?.body_en) ||
+    t(
+      'Không gian kết nối giáo dục canh tác cà phê bền vững, cập nhật mùa vụ, trải nghiệm tham quan nông trại đối tác và câu chuyện người trồng cà phê. Chương trình này là định hướng cộng đồng trải nghiệm — không phải mô hình sở hữu trang trại, cam kết lợi nhuận hay chia sẻ cổ phần.',
+      'A future-ready community concept dedicated to coffee cultivation education, seasonal harvest dispatches, curated farm visits, and grower storytelling. This initiative is strictly educational and experiential — it does not offer farm ownership, investment returns, or profit sharing.'
+    );
+
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-14 space-y-10">
-      <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
-          {t('Định hướng tương lai · Đề xuất phát triển (Sắp ra mắt)', 'Future Concept · Proposed Community Program')}
-        </p>
-        <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
-          {t('Trang Trại ROAR & Cộng Đồng Thành Viên', 'ROAR Coffee Farm & Membership Concept')}
-        </h1>
-        <p className="text-base text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed max-w-3xl">
-          {t(
-            'Không gian kết nối giáo dục canh tác cà phê bền vững, cập nhật mùa vụ, trải nghiệm tham quan nông trại đối tác và câu chuyện người trồng cà phê. Chương trình này là định hướng cộng đồng trải nghiệm — không phải mô hình sở hữu trang trại, cam kết lợi nhuận hay chia sẻ cổ phần.',
-            'A future-ready community concept dedicated to coffee cultivation education, seasonal harvest dispatches, curated farm visits, and grower storytelling. This initiative is strictly educational and experiential — it does not offer farm ownership, investment returns, or profit sharing.'
-          )}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-3 max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#00552B] dark:text-[#C6A667]">
+            {eyebrow}
+          </p>
+          <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
+            {title}
+          </h1>
+          <p className="text-base text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed whitespace-pre-line">
+            {body}
+          </p>
+        </div>
+        <AdminPageEditLink slug="farm-membership" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[
-          {
-            vi: 'Giáo dục Canh tác & Sơ chế',
-            en: 'Cultivation & Processing Education',
-            descVi: 'Tìm hiểu vòng đời cây cà phê từ mùa hoa trắng Tây Nguyên đến thu hoạch và phơi Natural, Honey, CBU.',
-            descEn: 'Follow the coffee lifecycle from Central Highlands blossom through selective harvest and Natural, Honey, and CBU drying.',
-          },
-          {
-            vi: 'Nhật ký Mùa vụ (Đề xuất)',
-            en: 'Seasonal Harvest Updates (Proposed)',
-            descVi: 'Cập nhật tiến độ thu hái theo từng vùng nguyên liệu hợp tác khi chương trình chính thức vận hành.',
-            descEn: 'Scheduled harvest dispatches across verified partner localities once the program launches.',
-          },
-          {
-            vi: 'Trải nghiệm Nông trại & Cupping',
-            en: 'Farm Experiences & Cupping',
-            descVi: 'Lịch tham quan và thử nếm dành cho thành viên ROAR Gold & ROAR Reserve (Sắp ra mắt).',
-            descEn: 'Curated origin visits and member cupping sessions planned for future ROAR Gold & Reserve cohorts.',
-          },
-        ].map((item) => (
-          <div key={item.en} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-2">
-            <span className="text-[11px] font-mono text-[#00552B] dark:text-[#C6A667]">{t('Sắp ra mắt / Đề xuất', 'Proposed / Coming Soon')}</span>
-            <h2 className="text-lg font-bold text-[#202020] dark:text-[#F1EFEA]">{t(item.vi, item.en)}</h2>
-            <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">{t(item.descVi, item.descEn)}</p>
+        {items.map((item, idx) => (
+          <div key={`${item.title_en}-${idx}`} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-2">
+            <span className="text-[11px] font-mono text-[#00552B] dark:text-[#C6A667]">
+              {(lang === 'vi' ? item.tag_vi : item.tag_en) || t('Sắp ra mắt / Đề xuất', 'Proposed / Coming Soon')}
+            </span>
+            <h2 className="text-lg font-bold text-[#202020] dark:text-[#F1EFEA]">{lang === 'vi' ? item.title_vi : item.title_en}</h2>
+            <p className="text-sm text-[#202020]/75 dark:text-[#F1EFEA]/75 leading-relaxed">{lang === 'vi' ? item.body_vi : item.body_en}</p>
           </div>
         ))}
       </div>

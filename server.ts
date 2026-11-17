@@ -5,11 +5,14 @@ import path from 'node:path';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import {
+  ADMIN_ROLE_PRESETS,
+  ALL_ADMIN_PERMISSIONS,
   attachAuth,
   type AuthedRequest,
   hashPassword,
   requireAdmin,
   requireAuth,
+  resolveEffectiveAdminPermissions,
   SESSION_COOKIE_NAME,
   signSessionToken,
   verifyPassword,
@@ -118,6 +121,35 @@ function createUserNotification(
     opts.category,
     opts.linkUrl || '/account'
   );
+}
+
+function requirePermission(...allowedPerms: string[]) {
+  return (req: AuthedRequest, res: express.Response, next: express.NextFunction): void => {
+    if (!req.authUser) {
+      res.status(401).json({ error: 'Administrator authentication required' });
+      return;
+    }
+    const dbUser = db
+      .prepare('SELECT id, email, role, admin_role, admin_permissions_json FROM users WHERE id = ?')
+      .get(req.authUser.userId) as any;
+    if (!dbUser || dbUser.role !== 'admin') {
+      res.status(403).json({ error: 'Forbidden: Administrator role required' });
+      return;
+    }
+    const { adminRole, adminPermissions } = resolveEffectiveAdminPermissions(dbUser);
+    if (adminRole === 'super_admin') {
+      next();
+      return;
+    }
+    const permitted = allowedPerms.some((p) => adminPermissions.includes(p));
+    if (!permitted) {
+      res.status(403).json({
+        error: `Tài khoản quản trị chưa được cấp quyền cho phân hệ (${allowedPerms.join(' / ')}).`,
+      });
+      return;
+    }
+    next();
+  };
 }
 
 // ---------- SEO ROUTES ----------
@@ -250,6 +282,7 @@ app.post('/api/auth/login', (req, res) => {
 
   const token = signSessionToken({ userId: user.id, email: user.email, role: user.role });
   setSessionCookie(req, res, token);
+  const rbac = resolveEffectiveAdminPermissions(user);
 
   res.json({
     token,
@@ -259,6 +292,8 @@ app.post('/api/auth/login', (req, res) => {
       fullName: user.full_name,
       phone: user.phone,
       role: user.role,
+      adminRole: rbac.adminRole,
+      adminPermissions: rbac.adminPermissions,
       memberCode: user.member_code,
       tier: user.tier,
       emailVerified: Boolean(user.email_verified),
@@ -337,6 +372,7 @@ app.get('/api/auth/me', (req: AuthedRequest, res) => {
   const unreadNotifications = (
     db.prepare('SELECT COUNT(*) as c FROM user_notifications WHERE user_id = ? AND is_read = 0').get(user.id) as { c: number }
   ).c;
+  const rbac = resolveEffectiveAdminPermissions(user);
   res.json({
     user: {
       id: user.id,
@@ -344,6 +380,8 @@ app.get('/api/auth/me', (req: AuthedRequest, res) => {
       fullName: user.full_name,
       phone: user.phone,
       role: user.role,
+      adminRole: rbac.adminRole,
+      adminPermissions: rbac.adminPermissions,
       memberCode: user.member_code,
       tier: user.tier,
       emailVerified: Boolean(user.email_verified),
@@ -476,8 +514,34 @@ app.get('/api/site-bootstrap', (_req, res) => {
   }));
   const tiers = db.prepare('SELECT * FROM membership_tiers ORDER BY min_spend_vnd ASC').all();
   const loyaltySettings = db.prepare('SELECT * FROM loyalty_settings WHERE id = 1').get();
+  const pageRows = db.prepare('SELECT * FROM cms_pages ORDER BY slug ASC').all() as any[];
+  const cmsPages: Record<string, any> = {};
+  for (const p of pageRows) {
+    let sections = [];
+    try {
+      sections = JSON.parse(p.sections_json || '[]');
+    } catch {
+      sections = [];
+    }
+    cmsPages[p.slug] = { ...p, sections };
+  }
 
-  res.json({ settings, personalities, origins, tiers, loyaltySettings });
+  res.json({ settings, personalities, origins, tiers, loyaltySettings, cmsPages });
+});
+
+app.get('/api/pages/:slug', (req, res) => {
+  const p = db.prepare('SELECT * FROM cms_pages WHERE slug = ?').get(req.params.slug) as any;
+  if (!p) {
+    res.status(404).json({ error: 'Page not found' });
+    return;
+  }
+  let sections = [];
+  try {
+    sections = JSON.parse(p.sections_json || '[]');
+  } catch {
+    sections = [];
+  }
+  res.json({ page: { ...p, sections } });
 });
 
 app.get('/api/products', (req, res) => {
@@ -1015,7 +1079,7 @@ app.get('/api/journal/:slug', (req, res) => {
 });
 
 // ---------- PROTECTED ADMIN CMS ROUTES ----------
-app.get('/api/admin/overview', requireAdmin, (_req, res) => {
+app.get('/api/admin/overview', requirePermission('overview'), (_req, res) => {
   const revRow = db
     .prepare("SELECT COALESCE(SUM(total), 0) as revenue, COUNT(*) as totalOrders, COALESCE(AVG(total), 0) as aov FROM orders WHERE order_status != 'Cancelled'")
     .get() as { revenue: number; totalOrders: number; aov: number };
@@ -1066,7 +1130,7 @@ function toSafeSlug(raw: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-app.get('/api/admin/products', requireAdmin, (_req, res) => {
+app.get('/api/admin/products', requirePermission('products'), (_req, res) => {
   const rows = db.prepare('SELECT * FROM products ORDER BY category ASC, id DESC').all() as any[];
   const products = rows.map((p) => ({
     ...p,
@@ -1078,7 +1142,7 @@ app.get('/api/admin/products', requireAdmin, (_req, res) => {
   res.json({ products });
 });
 
-app.post('/api/admin/products', requireAdmin, (req: AuthedRequest, res) => {
+app.post('/api/admin/products', requirePermission('products'), (req: AuthedRequest, res) => {
   const b = req.body || {};
   if (!b.sku || !b.name_vi || !b.category) {
     res.status(400).json({ error: 'Vui lòng nhập Mã SKU, Tên sản phẩm và Danh mục.' });
@@ -1148,7 +1212,7 @@ app.post('/api/admin/products', requireAdmin, (req: AuthedRequest, res) => {
   res.status(201).json({ ok: true, id: Number(result.lastInsertRowid) });
 });
 
-app.patch('/api/admin/products/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/products/:id', requirePermission('products'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id) as any;
   if (!existing) {
@@ -1216,7 +1280,7 @@ app.patch('/api/admin/products/:id', requireAdmin, (req: AuthedRequest, res) => 
   res.json({ ok: true });
 });
 
-app.delete('/api/admin/products/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.delete('/api/admin/products/:id', requirePermission('products'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id) as any;
   if (!existing) {
@@ -1243,7 +1307,7 @@ app.delete('/api/admin/products/:id', requireAdmin, (req: AuthedRequest, res) =>
   res.json({ ok: true });
 });
 
-app.get('/api/admin/orders', requireAdmin, (_req, res) => {
+app.get('/api/admin/orders', requirePermission('orders'), (_req, res) => {
   const orders = db.prepare('SELECT * FROM orders ORDER BY id DESC').all() as any[];
   const enriched = orders.map((o) => ({
     ...o,
@@ -1256,7 +1320,7 @@ app.get('/api/admin/orders', requireAdmin, (_req, res) => {
   res.json({ orders: enriched });
 });
 
-app.patch('/api/admin/orders/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/orders/:id', requirePermission('orders'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { orderStatus, paymentStatus, trackingCode, resolutionNote } = req.body || {};
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as any;
@@ -1414,7 +1478,7 @@ app.patch('/api/admin/orders/:id', requireAdmin, (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/admin/customers', requireAdmin, (_req, res) => {
+app.get('/api/admin/customers', requirePermission('customers'), (_req, res) => {
   const users = db
     .prepare('SELECT id, email, full_name, phone, role, member_code, tier, email_verified, company_name, b2b_verified, deletion_requested, created_at FROM users ORDER BY id DESC')
     .all() as any[];
@@ -1438,7 +1502,7 @@ app.get('/api/admin/customers', requireAdmin, (_req, res) => {
   res.json({ customers: enriched, tiers, loyaltySettings });
 });
 
-app.patch('/api/admin/customers/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/customers/:id', requirePermission('customers'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { tier, b2bVerified, pointsDelta, adjustmentNote } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
@@ -1467,7 +1531,7 @@ app.patch('/api/admin/customers/:id', requireAdmin, (req: AuthedRequest, res) =>
   res.json({ ok: true });
 });
 
-app.post('/api/admin/customers/:id/notify', requireAdmin, (req: AuthedRequest, res) => {
+app.post('/api/admin/customers/:id/notify', requirePermission('customers'), (req: AuthedRequest, res) => {
   const targetParam = req.params.id;
   const { titleVi, titleEn, messageVi, messageEn, category = 'promo', linkUrl = '/account?tab=vouchers' } = req.body || {};
   if (!titleVi || !messageVi) {
@@ -1511,7 +1575,7 @@ app.post('/api/admin/customers/:id/notify', requireAdmin, (req: AuthedRequest, r
   res.status(201).json({ ok: true, sentCount });
 });
 
-app.patch('/api/admin/loyalty-settings', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/loyalty-settings', requirePermission('customers'), (req: AuthedRequest, res) => {
   const { pointsPer10kVnd, vndPerPoint, expirationDays, maxRedeemPercent } = req.body || {};
   db.prepare(`
     UPDATE loyalty_settings SET points_per_10k_vnd = ?, vnd_per_point = ?, expiration_days = ?, max_redeem_percent = ?, updated_at = datetime('now')
@@ -1526,11 +1590,11 @@ app.patch('/api/admin/loyalty-settings', requireAdmin, (req: AuthedRequest, res)
   res.json({ ok: true });
 });
 
-app.get('/api/admin/promotions', requireAdmin, (_req, res) => {
+app.get('/api/admin/promotions', requirePermission('promotions'), (_req, res) => {
   res.json({ promotions: db.prepare('SELECT * FROM promotions ORDER BY id DESC').all() });
 });
 
-app.post('/api/admin/promotions', requireAdmin, (req: AuthedRequest, res) => {
+app.post('/api/admin/promotions', requirePermission('promotions'), (req: AuthedRequest, res) => {
   const b = req.body || {};
   if (!b.code || !b.title_vi || !b.title_en || !b.start_date || !b.end_date) {
     res.status(400).json({ error: 'Code, bilingual titles, start_date, and end_date are required' });
@@ -1584,7 +1648,7 @@ app.post('/api/admin/promotions', requireAdmin, (req: AuthedRequest, res) => {
   res.status(201).json({ ok: true });
 });
 
-app.patch('/api/admin/promotions/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/promotions/:id', requirePermission('promotions'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { active } = req.body || {};
   db.prepare('UPDATE promotions SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
@@ -1592,11 +1656,11 @@ app.patch('/api/admin/promotions/:id', requireAdmin, (req: AuthedRequest, res) =
   res.json({ ok: true });
 });
 
-app.get('/api/admin/b2b', requireAdmin, (_req, res) => {
+app.get('/api/admin/b2b', requirePermission('b2b'), (_req, res) => {
   res.json({ inquiries: db.prepare('SELECT * FROM b2b_inquiries ORDER BY id DESC').all() });
 });
 
-app.patch('/api/admin/b2b/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/b2b/:id', requirePermission('b2b'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { status, quotedPrice, adminNotes } = req.body || {};
   db.prepare('UPDATE b2b_inquiries SET status = ?, quoted_price = ?, admin_notes = ? WHERE id = ?').run(
@@ -1609,7 +1673,7 @@ app.patch('/api/admin/b2b/:id', requireAdmin, (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-app.patch('/api/admin/personalities/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/personalities/:id', requirePermission('brand'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const { customImageUrl, storyVi, storyEn, traitsVi, traitsEn } = req.body || {};
   const existing = db.prepare('SELECT * FROM personalities WHERE id = ?').get(id) as any;
@@ -1631,7 +1695,7 @@ app.patch('/api/admin/personalities/:id', requireAdmin, (req: AuthedRequest, res
   res.json({ ok: true });
 });
 
-app.patch('/api/admin/origins/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/origins/:id', requirePermission('brand'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const b = req.body || {};
   const existing = db.prepare('SELECT * FROM coffee_origins WHERE id = ?').get(id) as any;
@@ -1653,12 +1717,12 @@ app.patch('/api/admin/origins/:id', requireAdmin, (req: AuthedRequest, res) => {
 });
 
 // ---------- WORDPRESS-STYLE MEDIA LIBRARY & JOURNAL POSTS & SETTINGS ----------
-app.get('/api/admin/media', requireAdmin, (_req, res) => {
+app.get('/api/admin/media', requirePermission('media', 'posts', 'products', 'pages', 'brand'), (_req, res) => {
   const assets = db.prepare('SELECT * FROM media_assets ORDER BY id DESC').all();
   res.json({ assets });
 });
 
-app.post('/api/admin/media', requireAdmin, (req: AuthedRequest, res) => {
+app.post('/api/admin/media', requirePermission('media'), (req: AuthedRequest, res) => {
   const { filename, dataUrl, title = '', altText = '' } = req.body || {};
   if (!filename || !dataUrl || typeof dataUrl !== 'string') {
     res.status(400).json({ error: 'Thiếu tệp hình ảnh hợp lệ.' });
@@ -1704,7 +1768,7 @@ app.post('/api/admin/media', requireAdmin, (req: AuthedRequest, res) => {
   res.status(201).json({ ok: true, asset });
 });
 
-app.patch('/api/admin/media/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/media/:id', requirePermission('media'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM media_assets WHERE id = ?').get(id) as any;
   if (!existing) {
@@ -1720,7 +1784,7 @@ app.patch('/api/admin/media/:id', requireAdmin, (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/admin/media/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.delete('/api/admin/media/:id', requirePermission('media'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM media_assets WHERE id = ?').get(id) as any;
   if (!existing) {
@@ -1739,7 +1803,7 @@ app.delete('/api/admin/media/:id', requireAdmin, (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/admin/journal', requireAdmin, (_req, res) => {
+app.get('/api/admin/journal', requirePermission('posts'), (_req, res) => {
   const rows = db.prepare('SELECT * FROM journal_articles ORDER BY id DESC').all() as any[];
   const articles = rows.map((a) => ({
     ...a,
@@ -1748,7 +1812,7 @@ app.get('/api/admin/journal', requireAdmin, (_req, res) => {
   res.json({ articles });
 });
 
-app.post('/api/admin/journal', requireAdmin, (req: AuthedRequest, res) => {
+app.post('/api/admin/journal', requirePermission('posts'), (req: AuthedRequest, res) => {
   const b = req.body || {};
   if (!b.title_vi || !b.category) {
     res.status(400).json({ error: 'Vui lòng nhập Tiêu đề bài viết và Chuyên mục.' });
@@ -1784,7 +1848,7 @@ app.post('/api/admin/journal', requireAdmin, (req: AuthedRequest, res) => {
   res.status(201).json({ ok: true, id: newId, slug });
 });
 
-app.patch('/api/admin/journal/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/journal/:id', requirePermission('posts'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM journal_articles WHERE id = ?').get(id) as any;
   if (!existing) {
@@ -1820,7 +1884,7 @@ app.patch('/api/admin/journal/:id', requireAdmin, (req: AuthedRequest, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/admin/journal/:id', requireAdmin, (req: AuthedRequest, res) => {
+app.delete('/api/admin/journal/:id', requirePermission('posts'), (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM journal_articles WHERE id = ?').get(id) as any;
   if (!existing) {
@@ -1832,14 +1896,237 @@ app.delete('/api/admin/journal/:id', requireAdmin, (req: AuthedRequest, res) => 
   res.json({ ok: true });
 });
 
-app.get('/api/admin/settings', requireAdmin, (_req, res) => {
+// ---------- CMS SUBPAGES EDITOR (TRANG CON WEBSITE) ----------
+app.get('/api/admin/pages', requirePermission('pages'), (_req, res) => {
+  const rows = db.prepare('SELECT * FROM cms_pages ORDER BY group_name ASC, slug ASC').all() as any[];
+  const pages = rows.map((p) => {
+    let sections = [];
+    try {
+      sections = JSON.parse(p.sections_json || '[]');
+    } catch {
+      sections = [];
+    }
+    return { ...p, sections };
+  });
+  res.json({ pages });
+});
+
+app.patch('/api/admin/pages/:slug', requirePermission('pages'), (req: AuthedRequest, res) => {
+  const slug = req.params.slug;
+  const existing = db.prepare('SELECT * FROM cms_pages WHERE slug = ?').get(slug) as any;
+  if (!existing) {
+    res.status(404).json({ error: 'Không tìm thấy trang con' });
+    return;
+  }
+  const b = req.body || {};
+  db.prepare(`
+    UPDATE cms_pages SET
+      eyebrow_vi = ?, eyebrow_en = ?,
+      title_vi = ?, title_en = ?,
+      subtitle_vi = ?, subtitle_en = ?,
+      body_vi = ?, body_en = ?,
+      hero_image_key = ?,
+      cta_label_vi = ?, cta_label_en = ?, cta_url = ?,
+      sections_json = ?,
+      updated_at = datetime('now')
+    WHERE slug = ?
+  `).run(
+    b.eyebrow_vi ?? existing.eyebrow_vi,
+    b.eyebrow_en ?? existing.eyebrow_en,
+    b.title_vi ?? existing.title_vi,
+    b.title_en ?? existing.title_en,
+    b.subtitle_vi ?? existing.subtitle_vi,
+    b.subtitle_en ?? existing.subtitle_en,
+    b.body_vi ?? existing.body_vi,
+    b.body_en ?? existing.body_en,
+    b.hero_image_key ?? existing.hero_image_key,
+    b.cta_label_vi ?? existing.cta_label_vi,
+    b.cta_label_en ?? existing.cta_label_en,
+    b.cta_url ?? existing.cta_url,
+    b.sections !== undefined ? JSON.stringify(Array.isArray(b.sections) ? b.sections : []) : existing.sections_json,
+    slug
+  );
+  logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_CMS_PAGE', 'cms_page', slug, {
+    title_vi: b.title_vi ?? existing.title_vi,
+  });
+  const updated = db.prepare('SELECT * FROM cms_pages WHERE slug = ?').get(slug) as any;
+  res.json({ ok: true, page: { ...updated, sections: JSON.parse(updated.sections_json || '[]') } });
+});
+
+// ---------- ADMIN TEAM & RBAC PERMISSIONS MANAGEMENT ----------
+app.get('/api/admin/team', requirePermission('team'), (_req, res) => {
+  const adminRows = db
+    .prepare(
+      "SELECT id, email, full_name, phone, role, admin_role, admin_permissions_json, member_code, tier, created_at FROM users WHERE role = 'admin' ORDER BY id ASC"
+    )
+    .all() as any[];
+
+  const admins = adminRows.map((u) => {
+    const rbac = resolveEffectiveAdminPermissions(u);
+    return {
+      id: u.id,
+      email: u.email,
+      fullName: u.full_name,
+      phone: u.phone,
+      role: u.role,
+      adminRole: rbac.adminRole,
+      adminPermissions: rbac.adminPermissions,
+      memberCode: u.member_code,
+      tier: u.tier,
+      createdAt: u.created_at,
+    };
+  });
+
+  const nonAdmins = db
+    .prepare(
+      "SELECT id, email, full_name, phone, role, member_code FROM users WHERE role != 'admin' ORDER BY id DESC LIMIT 100"
+    )
+    .all() as any[];
+
+  const auditLogs = db.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 50').all();
+
+  res.json({ admins, nonAdmins, auditLogs });
+});
+
+app.post('/api/admin/team', requirePermission('team'), (req: AuthedRequest, res) => {
+  const { email, fullName, phone = '', password, adminRole = 'content_editor', permissions } = req.body || {};
+  if (!email) {
+    res.status(400).json({ error: 'Vui lòng nhập email quản trị viên.' });
+    return;
+  }
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const validRole = Object.keys(ADMIN_ROLE_PRESETS).includes(adminRole) ? adminRole : 'custom_staff';
+  const resolvedPerms: string[] =
+    validRole === 'super_admin'
+      ? [...ALL_ADMIN_PERMISSIONS]
+      : Array.isArray(permissions)
+        ? permissions.filter((p): p is string => (ALL_ADMIN_PERMISSIONS as readonly string[]).includes(p))
+        : ADMIN_ROLE_PRESETS[validRole] || ['overview'];
+
+  const existing = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail) as any;
+  if (existing) {
+    db.prepare(`
+      UPDATE users SET role = 'admin', admin_role = ?, admin_permissions_json = ?, email_verified = 1 WHERE id = ?
+    `).run(validRole, JSON.stringify(resolvedPerms), existing.id);
+
+    logAudit(req.authUser!.userId, req.authUser!.email, 'PROMOTE_ADMIN_MEMBER', 'user', existing.id, {
+      email: normalizedEmail,
+      adminRole: validRole,
+      permissions: resolvedPerms,
+    });
+    res.status(200).json({ ok: true, id: existing.id, promoted: true });
+    return;
+  }
+
+  if (!fullName || !password || String(password).length < 8) {
+    res.status(400).json({ error: 'Tài khoản mới cần Họ tên và Mật khẩu tối thiểu 8 ký tự.' });
+    return;
+  }
+
+  const memberCode = `RC-ADM-${Math.floor(1000 + Math.random() * 9000)}`;
+  const ins = db
+    .prepare(`
+      INSERT INTO users (
+        email, password_hash, full_name, phone, role, admin_role, admin_permissions_json,
+        member_code, tier, email_verified
+      ) VALUES (?, ?, ?, ?, 'admin', ?, ?, ?, 'ROAR Gold', 1)
+    `)
+    .run(
+      normalizedEmail,
+      hashPassword(String(password)),
+      String(fullName).trim(),
+      String(phone || '').trim(),
+      validRole,
+      JSON.stringify(resolvedPerms),
+      memberCode
+    );
+
+  const newId = Number(ins.lastInsertRowid);
+  logAudit(req.authUser!.userId, req.authUser!.email, 'CREATE_ADMIN_MEMBER', 'user', newId, {
+    email: normalizedEmail,
+    adminRole: validRole,
+    permissions: resolvedPerms,
+  });
+  res.status(201).json({ ok: true, id: newId });
+});
+
+app.patch('/api/admin/team/:id', requirePermission('team'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
+  if (!target) {
+    res.status(404).json({ error: 'Không tìm thấy thành viên' });
+    return;
+  }
+
+  const { adminRole, permissions, revokeAdmin, fullName } = req.body || {};
+  const superAdminCount = (
+    db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'admin' AND admin_role = 'super_admin'").get() as { c: number }
+  ).c;
+
+  if (revokeAdmin) {
+    if (target.id === req.authUser!.userId) {
+      res.status(400).json({ error: 'Không thể tự thu hồi quyền quản trị của chính tài khoản đang đăng nhập.' });
+      return;
+    }
+    if (target.admin_role === 'super_admin' && superAdminCount <= 1) {
+      res.status(400).json({ error: 'Phải giữ lại ít nhất 1 Quản trị Tối cao (Super Admin).' });
+      return;
+    }
+    db.prepare("UPDATE users SET role = 'customer', admin_role = 'none', admin_permissions_json = '[]' WHERE id = ?").run(id);
+    logAudit(req.authUser!.userId, req.authUser!.email, 'REVOKE_ADMIN_MEMBER', 'user', id, { email: target.email });
+    res.json({ ok: true });
+    return;
+  }
+
+  const nextRole =
+    adminRole && Object.keys(ADMIN_ROLE_PRESETS).includes(adminRole)
+      ? String(adminRole)
+      : target.admin_role && target.admin_role !== 'none'
+        ? target.admin_role
+        : 'custom_staff';
+
+  if (target.admin_role === 'super_admin' && nextRole !== 'super_admin' && superAdminCount <= 1) {
+    res.status(400).json({ error: 'Không thể hạ cấp Quản trị Tối cao cuối cùng trong hệ thống.' });
+    return;
+  }
+
+  const nextPerms: string[] =
+    nextRole === 'super_admin'
+      ? [...ALL_ADMIN_PERMISSIONS]
+      : Array.isArray(permissions)
+        ? permissions.filter((p): p is string => (ALL_ADMIN_PERMISSIONS as readonly string[]).includes(p))
+        : ADMIN_ROLE_PRESETS[nextRole] || JSON.parse(target.admin_permissions_json || '[]');
+
+  if (target.id === req.authUser!.userId && nextRole !== 'super_admin' && !nextPerms.includes('team')) {
+    res.status(400).json({ error: 'Không thể tự bỏ quyền Phân quyền Thành viên của chính bạn.' });
+    return;
+  }
+
+  db.prepare(`
+    UPDATE users SET
+      role = 'admin',
+      admin_role = ?,
+      admin_permissions_json = ?,
+      full_name = ?
+    WHERE id = ?
+  `).run(nextRole, JSON.stringify(nextPerms), fullName ? String(fullName).trim() : target.full_name, id);
+
+  logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_ADMIN_RBAC', 'user', id, {
+    email: target.email,
+    adminRole: nextRole,
+    permissions: nextPerms,
+  });
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/settings', requirePermission('settings'), (_req, res) => {
   const rows = db.prepare('SELECT key, value FROM site_settings').all() as Array<{ key: string; value: string }>;
   const settings: Record<string, string> = {};
   for (const r of rows) settings[r.key] = r.value;
   res.json({ settings });
 });
 
-app.patch('/api/admin/settings', requireAdmin, (req: AuthedRequest, res) => {
+app.patch('/api/admin/settings', requirePermission('settings'), (req: AuthedRequest, res) => {
   const updates = req.body || {};
   const upsert = db.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   for (const [k, v] of Object.entries(updates)) {

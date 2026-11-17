@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Archive,
   Bell,
@@ -10,6 +10,7 @@ import {
   Edit3,
   ExternalLink,
   Eye,
+  FileEdit,
   FileText,
   Image as ImageIcon,
   ImagePlus,
@@ -24,6 +25,7 @@ import {
   Search,
   Send,
   Settings,
+  Shield,
   ShieldAlert,
   ShoppingCart,
   Tag,
@@ -35,7 +37,7 @@ import {
 } from 'lucide-react';
 import { AdaptiveLogo } from '../components/AdaptiveLogo';
 import { useI18n } from '../i18n/I18nContext';
-import { useStore } from '../context/StoreContext';
+import { useStore, type CmsPageData } from '../context/StoreContext';
 import { resolveMediaUrl } from '../lib/media';
 import {
   localizeB2BType,
@@ -44,22 +46,15 @@ import {
   localizePaymentStatus,
   localizeVariantLabel,
 } from '../lib/i18nHelpers';
+import { getRolePreset, hasAdminPermission, type AdminPermission } from '../lib/rbac';
 import { MediaLibrarySection } from '../components/admin/MediaLibrarySection';
 import { MediaPickerModal, type MediaAssetRecord } from '../components/admin/MediaPickerModal';
 import { ProductEditorModal } from '../components/admin/ProductEditorModal';
 import { JournalManagerSection, type JournalAdminArticle } from '../components/admin/JournalManagerSection';
+import { PagesManagerSection } from '../components/admin/PagesManagerSection';
+import { TeamRbacSection, type AdminTeamMember, type NonAdminCandidate } from '../components/admin/TeamRbacSection';
 
-type CmsSection =
-  | 'overview'
-  | 'posts'
-  | 'media'
-  | 'products'
-  | 'orders'
-  | 'customers'
-  | 'promotions'
-  | 'b2b'
-  | 'brand'
-  | 'settings';
+type CmsSection = AdminPermission;
 
 const CATEGORY_LABELS_VI: Record<string, string> = {
   roasted: 'Cà phê Rang xay',
@@ -88,19 +83,23 @@ export const AdminCmsPage: React.FC = () => {
   const { lang, setLang, t } = useI18n();
   const { user, setAuthSession, clearAuthSession, apiFetch, personalities, origins, refreshBootstrap, showToast } =
     useStore();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
 
-  const [section, setSection] = useState<CmsSection>('overview');
+  const requestedSectionParam = searchParams.get('section') as CmsSection | null;
+  const requestedPageSlug = searchParams.get('page');
+  const [section, setSection] = useState<CmsSection>(requestedSectionParam || 'overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Core Admin Datasets
   const [overview, setOverview] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [articles, setArticles] = useState<JournalAdminArticle[]>([]);
+  const [cmsPagesList, setCmsPagesList] = useState<CmsPageData[]>([]);
   const [mediaAssets, setMediaAssets] = useState<MediaAssetRecord[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -108,6 +107,9 @@ export const AdminCmsPage: React.FC = () => {
   const [promotions, setPromotions] = useState<any[]>([]);
   const [inquiries, setInquiries] = useState<any[]>([]);
   const [siteSettings, setSiteSettings] = useState<Record<string, string>>({});
+  const [teamAdmins, setTeamAdmins] = useState<AdminTeamMember[]>([]);
+  const [teamNonAdmins, setTeamNonAdmins] = useState<NonAdminCandidate[]>([]);
+  const [teamAuditLogs, setTeamAuditLogs] = useState<any[]>([]);
 
   // Products filters & modals
   const [prodCatFilter, setProdCatFilter] = useState<'all' | 'roasted' | 'instant' | 'green_bean'>('all');
@@ -153,8 +155,12 @@ export const AdminCmsPage: React.FC = () => {
   const [savingSettings, setSavingSettings] = useState(false);
 
   const isAdmin = user?.role === 'admin';
+  const canMedia =
+    isAdmin &&
+    (['media', 'posts', 'products', 'pages', 'brand'] as AdminPermission[]).some((p) => hasAdminPermission(user, p));
 
   const loadMedia = async () => {
+    if (!canMedia) return;
     const res = await apiFetch('/api/admin/media');
     if (res.ok) {
       const d = await res.json();
@@ -165,18 +171,23 @@ export const AdminCmsPage: React.FC = () => {
   const loadAll = async () => {
     if (!isAdmin) return;
     try {
-      const [ov, pr, ar, md, or, cu, pm, b2, st] = await Promise.all([
-        apiFetch('/api/admin/overview').then((r) => (r.ok ? r.json() : null)),
-        apiFetch('/api/admin/products').then((r) => (r.ok ? r.json() : { products: [] })),
-        apiFetch('/api/admin/journal').then((r) => (r.ok ? r.json() : { articles: [] })),
-        apiFetch('/api/admin/media').then((r) => (r.ok ? r.json() : { assets: [] })),
-        apiFetch('/api/admin/orders').then((r) => (r.ok ? r.json() : { orders: [] })),
-        apiFetch('/api/admin/customers').then((r) => (r.ok ? r.json() : { customers: [] })),
-        apiFetch('/api/admin/promotions').then((r) => (r.ok ? r.json() : { promotions: [] })),
-        apiFetch('/api/admin/b2b').then((r) => (r.ok ? r.json() : { inquiries: [] })),
-        apiFetch('/api/admin/settings').then((r) => (r.ok ? r.json() : { settings: {} })),
+      const [ov, pg, pr, ar, md, or, cu, pm, b2, st, tm] = await Promise.all([
+        hasAdminPermission(user, 'overview') ? apiFetch('/api/admin/overview').then((r) => (r.ok ? r.json() : null)) : Promise.resolve(null),
+        hasAdminPermission(user, 'pages') ? apiFetch('/api/admin/pages').then((r) => (r.ok ? r.json() : { pages: [] })) : Promise.resolve({ pages: [] }),
+        hasAdminPermission(user, 'products') ? apiFetch('/api/admin/products').then((r) => (r.ok ? r.json() : { products: [] })) : Promise.resolve({ products: [] }),
+        hasAdminPermission(user, 'posts') ? apiFetch('/api/admin/journal').then((r) => (r.ok ? r.json() : { articles: [] })) : Promise.resolve({ articles: [] }),
+        canMedia ? apiFetch('/api/admin/media').then((r) => (r.ok ? r.json() : { assets: [] })) : Promise.resolve({ assets: [] }),
+        hasAdminPermission(user, 'orders') ? apiFetch('/api/admin/orders').then((r) => (r.ok ? r.json() : { orders: [] })) : Promise.resolve({ orders: [] }),
+        hasAdminPermission(user, 'customers') ? apiFetch('/api/admin/customers').then((r) => (r.ok ? r.json() : { customers: [] })) : Promise.resolve({ customers: [] }),
+        hasAdminPermission(user, 'promotions') ? apiFetch('/api/admin/promotions').then((r) => (r.ok ? r.json() : { promotions: [] })) : Promise.resolve({ promotions: [] }),
+        hasAdminPermission(user, 'b2b') ? apiFetch('/api/admin/b2b').then((r) => (r.ok ? r.json() : { inquiries: [] })) : Promise.resolve({ inquiries: [] }),
+        hasAdminPermission(user, 'settings') ? apiFetch('/api/admin/settings').then((r) => (r.ok ? r.json() : { settings: {} })) : Promise.resolve({ settings: {} }),
+        hasAdminPermission(user, 'team')
+          ? apiFetch('/api/admin/team').then((r) => (r.ok ? r.json() : { admins: [], nonAdmins: [], auditLogs: [] }))
+          : Promise.resolve({ admins: [], nonAdmins: [], auditLogs: [] }),
       ]);
       if (ov) setOverview(ov);
+      setCmsPagesList(pg.pages || []);
       setProducts(pr.products || []);
       setArticles(ar.articles || []);
       setMediaAssets(md.assets || []);
@@ -186,6 +197,9 @@ export const AdminCmsPage: React.FC = () => {
       setPromotions(pm.promotions || []);
       setInquiries(b2.inquiries || []);
       setSiteSettings(st.settings || {});
+      setTeamAdmins(tm.admins || []);
+      setTeamNonAdmins(tm.nonAdmins || []);
+      setTeamAuditLogs(tm.auditLogs || []);
     } catch {
       showToast(t('Không thể tải dữ liệu quản trị.', 'Unable to load CMS data.'));
     }
@@ -193,7 +207,13 @@ export const AdminCmsPage: React.FC = () => {
 
   useEffect(() => {
     loadAll();
-  }, [isAdmin]);
+  }, [isAdmin, user?.id, user?.adminRole, JSON.stringify(user?.adminPermissions || [])]);
+
+  useEffect(() => {
+    if (requestedSectionParam && hasAdminPermission(user, requestedSectionParam)) {
+      setSection(requestedSectionParam);
+    }
+  }, [requestedSectionParam, user?.adminRole, JSON.stringify(user?.adminPermissions || [])]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -562,21 +582,34 @@ export const AdminCmsPage: React.FC = () => {
               >
                 {loggingIn ? t('Đang đăng nhập...', 'Signing In...') : t('Đăng nhập Quản trị CMS', 'Sign In to CMS')}
               </button>
-              <div className="flex justify-between items-center text-xs text-slate-300">
+              <div className="flex flex-wrap justify-between items-center gap-2 text-xs text-slate-300">
                 <Link to="/" className="hover:text-white">
                   ← {t('Về trang chủ', 'Back to Storefront')}
                 </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('admin@roarcoffee.vn');
-                    setPassword('RoarAdmin!2026');
-                    setLoginError('');
-                  }}
-                  className="text-[#C6A667] hover:underline cursor-pointer"
-                >
-                  {t('Điền nhanh tài khoản Admin mẫu', 'Fill demo admin credentials')}
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('editor@roarcoffee.vn');
+                      setPassword('RoarEditor!2026');
+                      setLoginError('');
+                    }}
+                    className="text-slate-300 hover:text-white underline cursor-pointer"
+                  >
+                    {t('Biên tập viên', 'Demo Editor')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('admin@roarcoffee.vn');
+                      setPassword('RoarAdmin!2026');
+                      setLoginError('');
+                    }}
+                    className="text-[#C6A667] hover:underline cursor-pointer"
+                  >
+                    {t('Super Admin mẫu', 'Demo Super Admin')}
+                  </button>
+                </div>
               </div>
             </form>
           )}
@@ -585,8 +618,8 @@ export const AdminCmsPage: React.FC = () => {
     );
   }
 
-  // Sidebar Menu Definition (WordPress + WooCommerce grouped)
-  const navGroups: Array<{
+  // Sidebar Menu Definition (WordPress + WooCommerce grouped & RBAC filtered)
+  const rawNavGroups: Array<{
     groupLabel: string;
     items: Array<{ id: CmsSection; label: string; icon: React.ReactNode; count?: number }>;
   }> = [
@@ -597,6 +630,12 @@ export const AdminCmsPage: React.FC = () => {
     {
       groupLabel: t('Nội dung (WordPress)', 'Content (WordPress)'),
       items: [
+        {
+          id: 'pages',
+          label: t('Trang con Website', 'Storefront Pages'),
+          icon: <FileEdit className="w-4 h-4" />,
+          count: cmsPagesList.length,
+        },
         { id: 'posts', label: t('Bài viết', 'Posts'), icon: <FileText className="w-4 h-4" />, count: articles.length },
         {
           id: 'media',
@@ -626,11 +665,41 @@ export const AdminCmsPage: React.FC = () => {
         { id: 'b2b', label: t('Yêu cầu B2B', 'B2B Inquiries'), icon: <Briefcase className="w-4 h-4" />, count: inquiries.length },
         { id: 'brand', label: t('Linh vật & Vùng trồng', 'Mascots & Origins'), icon: <Compass className="w-4 h-4" /> },
         { id: 'settings', label: t('Cài đặt Website', 'Site Settings'), icon: <Settings className="w-4 h-4" /> },
+        {
+          id: 'team',
+          label: t('Phân quyền thành viên', 'Team & RBAC'),
+          icon: <Shield className="w-4 h-4" />,
+          count: teamAdmins.length || undefined,
+        },
       ],
     },
   ];
 
-  const activeNavItem = navGroups.flatMap((g) => g.items).find((i) => i.id === section);
+  const navGroups = rawNavGroups
+    .map((grp) => ({
+      ...grp,
+      items: grp.items.filter((item) => hasAdminPermission(user, item.id)),
+    }))
+    .filter((grp) => grp.items.length > 0);
+
+  const permittedSectionIds = navGroups.flatMap((g) => g.items.map((i) => i.id));
+  const resolvedSection: CmsSection = permittedSectionIds.includes(section)
+    ? section
+    : permittedSectionIds[0] || 'overview';
+
+  const activeNavItem = navGroups.flatMap((g) => g.items).find((i) => i.id === resolvedSection);
+  const currentRolePreset = getRolePreset(user.adminRole);
+
+  const selectSection = (nextSection: CmsSection) => {
+    setSection(nextSection);
+    setMobileMenuOpen(false);
+    setSearchParams((prev) => {
+      const sp = new URLSearchParams(prev);
+      sp.set('section', nextSection);
+      if (nextSection !== 'pages') sp.delete('page');
+      return sp;
+    }, { replace: true });
+  };
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-[#1D2327] text-slate-200 select-none">
@@ -653,15 +722,12 @@ export const AdminCmsPage: React.FC = () => {
             <p className="px-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">{grp.groupLabel}</p>
             <div className="space-y-0.5">
               {grp.items.map((item) => {
-                const active = section === item.id;
+                const active = resolvedSection === item.id;
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => {
-                      setSection(item.id);
-                      setMobileMenuOpen(false);
-                    }}
+                    onClick={() => selectSection(item.id)}
                     className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                       active ? 'bg-[#00552B] text-white' : 'text-slate-300 hover:bg-white/8 hover:text-white'
                     }`}
@@ -688,9 +754,12 @@ export const AdminCmsPage: React.FC = () => {
       </div>
 
       <div className="p-3 border-t border-white/10 text-xs space-y-2 bg-[#161B1E]">
-        <div className="px-1">
+        <div className="px-1 space-y-1">
           <p className="font-semibold text-white truncate">{user.fullName || 'Quản trị viên'}</p>
           <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+          <span className="inline-block px-2 py-0.5 rounded bg-[#00552B]/40 border border-[#C6A667]/30 text-[#C6A667] text-[10px] font-semibold">
+            {lang === 'en' ? currentRolePreset.labelEn : currentRolePreset.labelVi}
+          </span>
         </div>
         <button
           type="button"
@@ -772,7 +841,7 @@ export const AdminCmsPage: React.FC = () => {
         {/* Active Section Body */}
         <main className="flex-1 p-4 sm:p-6 max-w-[1440px] w-full mx-auto space-y-6">
           {/* 1. OVERVIEW DASHBOARD */}
-          {section === 'overview' && (
+          {resolvedSection === 'overview' && hasAdminPermission(user, 'overview') && (
             <div className="space-y-6">
               {/* Quick Actions */}
               <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
@@ -782,40 +851,56 @@ export const AdminCmsPage: React.FC = () => {
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {t(
-                      'Quản lý bài viết tạp chí, kho thư viện hình ảnh, danh mục sản phẩm và đơn hàng trực tuyến.',
-                      'Manage journal posts, media library assets, WooCommerce catalog, and orders.'
+                      'Quản lý trang con website, bài viết tạp chí, kho thư viện hình ảnh, danh mục sản phẩm và đơn hàng trực tuyến.',
+                      'Manage storefront subpages, journal posts, media library assets, catalog, and orders.'
                     )}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setSection('posts')}
-                    className="px-3.5 py-2 rounded-lg bg-[#00552B] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    {t('Quản lý Bài viết', 'Manage Posts')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSection('media')}
-                    className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    {t('Tải ảnh lên Thư viện', 'Upload Media')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingProduct(null);
-                      setSection('products');
-                      setProductModalOpen(true);
-                    }}
-                    className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    {t('Thêm Sản phẩm mới', 'Add New Product')}
-                  </button>
+                  {hasAdminPermission(user, 'pages') && (
+                    <button
+                      type="button"
+                      onClick={() => selectSection('pages')}
+                      className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FileEdit className="w-3.5 h-3.5 text-[#00552B]" />
+                      {t('Sửa Trang con', 'Edit Subpages')}
+                    </button>
+                  )}
+                  {hasAdminPermission(user, 'posts') && (
+                    <button
+                      type="button"
+                      onClick={() => selectSection('posts')}
+                      className="px-3.5 py-2 rounded-lg bg-[#00552B] text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      {t('Quản lý Bài viết', 'Manage Posts')}
+                    </button>
+                  )}
+                  {hasAdminPermission(user, 'media') && (
+                    <button
+                      type="button"
+                      onClick={() => selectSection('media')}
+                      className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      {t('Tải ảnh lên Thư viện', 'Upload Media')}
+                    </button>
+                  )}
+                  {hasAdminPermission(user, 'products') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingProduct(null);
+                        selectSection('products');
+                        setProductModalOpen(true);
+                      }}
+                      className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {t('Thêm Sản phẩm mới', 'Add New Product')}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -909,8 +994,19 @@ export const AdminCmsPage: React.FC = () => {
             </div>
           )}
 
+          {/* 1B. STOREFRONT SUBPAGES EDITOR (TRANG CON WEBSITE) */}
+          {resolvedSection === 'pages' && hasAdminPermission(user, 'pages') && (
+            <PagesManagerSection
+              pages={cmsPagesList}
+              initialSlug={requestedPageSlug}
+              mediaAssets={mediaAssets}
+              onMediaUploaded={loadMedia}
+              onSaved={loadAll}
+            />
+          )}
+
           {/* 2. WORDPRESS POSTS (BÀI VIẾT) */}
-          {section === 'posts' && (
+          {resolvedSection === 'posts' && hasAdminPermission(user, 'posts') && (
             <JournalManagerSection
               articles={articles}
               mediaAssets={mediaAssets}
@@ -920,10 +1016,12 @@ export const AdminCmsPage: React.FC = () => {
           )}
 
           {/* 3. WORDPRESS MEDIA LIBRARY (THƯ VIỆN ẢNH) */}
-          {section === 'media' && <MediaLibrarySection mediaAssets={mediaAssets} onRefresh={loadMedia} />}
+          {resolvedSection === 'media' && hasAdminPermission(user, 'media') && (
+            <MediaLibrarySection mediaAssets={mediaAssets} onRefresh={loadMedia} />
+          )}
 
           {/* 4. WOOCOMMERCE PRODUCTS (SẢN PHẨM) */}
-          {section === 'products' && (
+          {resolvedSection === 'products' && hasAdminPermission(user, 'products') && (
             <div className="space-y-4">
               {/* Filter & Add Product Bar */}
               <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
@@ -1128,7 +1226,7 @@ export const AdminCmsPage: React.FC = () => {
           )}
 
           {/* 5. SHOPEE SELLER CENTER STYLE ORDERS (ĐƠN HÀNG & GIẢI QUYẾT ĐƠN) */}
-          {section === 'orders' && (
+          {resolvedSection === 'orders' && hasAdminPermission(user, 'orders') && (
             <div className="space-y-4">
               {/* Shopee-style Segmented Status Tabs */}
               <div className="bg-white rounded-xl border border-slate-200 p-2 flex flex-wrap items-center gap-1.5 text-xs">
@@ -1432,7 +1530,7 @@ export const AdminCmsPage: React.FC = () => {
           )}
 
           {/* 6. CUSTOMERS & LOYALTY + DIRECT NOTIFICATIONS */}
-          {section === 'customers' && (
+          {resolvedSection === 'customers' && hasAdminPermission(user, 'customers') && (
             <div className="space-y-5">
               <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -1590,7 +1688,7 @@ export const AdminCmsPage: React.FC = () => {
           )}
 
           {/* 7. PROMOTIONS (KHUYẾN MÃI) */}
-          {section === 'promotions' && (
+          {resolvedSection === 'promotions' && hasAdminPermission(user, 'promotions') && (
             <div className="space-y-5">
               <form
                 onSubmit={createPromo}
@@ -1710,7 +1808,7 @@ export const AdminCmsPage: React.FC = () => {
           )}
 
           {/* 8. B2B INQUIRIES (ĐỐI TÁC B2B) */}
-          {section === 'b2b' && (
+          {resolvedSection === 'b2b' && hasAdminPermission(user, 'b2b') && (
             <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
@@ -1753,7 +1851,7 @@ export const AdminCmsPage: React.FC = () => {
           )}
 
           {/* 9. BRAND PERSONALITIES & ORIGINS */}
-          {section === 'brand' && (
+          {resolvedSection === 'brand' && hasAdminPermission(user, 'brand') && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4">
                 <div>
@@ -1826,7 +1924,7 @@ export const AdminCmsPage: React.FC = () => {
           )}
 
           {/* 10. SITE SETTINGS (CÀI ĐẶT WEBSITE) */}
-          {section === 'settings' && (
+          {resolvedSection === 'settings' && hasAdminPermission(user, 'settings') && (
             <form onSubmit={handleSaveSettings} className="bg-white p-6 rounded-xl border border-slate-200 max-w-3xl space-y-5 text-xs">
               <div>
                 <h2 className="text-base font-bold text-slate-900">{t('Cài đặt chung Website', 'General Site Settings')}</h2>
@@ -1902,6 +2000,16 @@ export const AdminCmsPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* 11. TEAM RBAC (PHÂN QUYỀN THÀNH VIÊN QUẢN TRỊ) */}
+          {resolvedSection === 'team' && hasAdminPermission(user, 'team') && (
+            <TeamRbacSection
+              admins={teamAdmins}
+              nonAdmins={teamNonAdmins}
+              auditLogs={teamAuditLogs}
+              onRefresh={loadAll}
+            />
           )}
         </main>
       </div>

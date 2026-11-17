@@ -4,6 +4,58 @@ import type { Request, Response, NextFunction } from 'express';
 const AUTH_SECRET = process.env.AUTH_SECRET || 'roar-coffee-dev-session-signing-key-2026';
 export const SESSION_COOKIE_NAME = 'roar_session';
 
+export const ALL_ADMIN_PERMISSIONS = [
+  'overview',
+  'pages',
+  'posts',
+  'media',
+  'products',
+  'orders',
+  'customers',
+  'promotions',
+  'b2b',
+  'brand',
+  'settings',
+  'team',
+] as const;
+
+export type AdminPermission = (typeof ALL_ADMIN_PERMISSIONS)[number];
+
+export const ADMIN_ROLE_PRESETS: Record<string, AdminPermission[]> = {
+  super_admin: [...ALL_ADMIN_PERMISSIONS],
+  order_manager: ['overview', 'orders', 'customers', 'promotions'],
+  content_editor: ['overview', 'pages', 'posts', 'media', 'brand'],
+  product_manager: ['overview', 'products', 'media', 'brand'],
+  cs_b2b: ['overview', 'orders', 'customers', 'b2b'],
+  custom_staff: ['overview'],
+};
+
+export function resolveEffectiveAdminPermissions(userRow: any): {
+  adminRole: string;
+  adminPermissions: string[];
+} {
+  if (!userRow || userRow.role !== 'admin') {
+    return { adminRole: 'none', adminPermissions: [] };
+  }
+  const adminRole = userRow.admin_role && userRow.admin_role !== 'none' ? String(userRow.admin_role) : 'super_admin';
+  if (adminRole === 'super_admin') {
+    return { adminRole: 'super_admin', adminPermissions: [...ALL_ADMIN_PERMISSIONS] };
+  }
+  let parsed: string[] = [];
+  try {
+    const raw = JSON.parse(userRow.admin_permissions_json || '[]');
+    if (Array.isArray(raw)) {
+      parsed = raw.filter((p): p is string => typeof p === 'string' && (ALL_ADMIN_PERMISSIONS as readonly string[]).includes(p));
+    }
+  } catch {
+    parsed = [];
+  }
+  if (parsed.length === 0 && ADMIN_ROLE_PRESETS[adminRole]) {
+    parsed = [...ADMIN_ROLE_PRESETS[adminRole]];
+  }
+  return { adminRole, adminPermissions: parsed };
+}
+
 export interface SessionPayload {
   userId: number;
   email: string;

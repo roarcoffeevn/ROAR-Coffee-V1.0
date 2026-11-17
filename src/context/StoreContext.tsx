@@ -68,6 +68,8 @@ export interface AuthUser {
   fullName: string;
   phone: string;
   role: 'customer' | 'b2b_partner' | 'admin';
+  adminRole?: string;
+  adminPermissions?: string[];
   memberCode: string;
   tier: string;
   emailVerified: boolean;
@@ -85,6 +87,35 @@ export interface AuthUser {
     expiringSoon: number;
   };
   unreadNotifications?: number;
+}
+
+export interface CmsPageSectionItem {
+  tag_vi?: string;
+  tag_en?: string;
+  title_vi: string;
+  title_en: string;
+  body_vi: string;
+  body_en: string;
+}
+
+export interface CmsPageData {
+  slug: string;
+  route_path: string;
+  group_name: string;
+  eyebrow_vi: string;
+  eyebrow_en: string;
+  title_vi: string;
+  title_en: string;
+  subtitle_vi: string;
+  subtitle_en: string;
+  body_vi: string;
+  body_en: string;
+  hero_image_key: string;
+  cta_label_vi: string;
+  cta_label_en: string;
+  cta_url: string;
+  sections: CmsPageSectionItem[];
+  updated_at?: string;
 }
 
 export interface Personality {
@@ -162,6 +193,7 @@ interface StoreContextValue {
   tiers: any[];
   loyaltySettings: any;
   settings: Record<string, string>;
+  cmsPages: Record<string, CmsPageData>;
   refreshBootstrap: () => Promise<void>;
   toast: string | null;
   showToast: (msg: string) => void;
@@ -231,6 +263,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [tiers, setTiers] = useState<any[]>([]);
   const [loyaltySettings, setLoyaltySettings] = useState<any>(null);
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [cmsPages, setCmsPages] = useState<Record<string, CmsPageData>>({});
   const [toast, setToast] = useState<string | null>(null);
   const [customBreadcrumb, setCustomBreadcrumb] = useState<BreadcrumbNode[] | null>(null);
 
@@ -297,6 +330,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setTiers(data.tiers || []);
       setLoyaltySettings(data.loyaltySettings || null);
       setSettings(data.settings || {});
+      setCmsPages(data.cmsPages || {});
     } catch {
       // silent
     }
@@ -412,6 +446,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         tiers,
         loyaltySettings,
         settings,
+        cmsPages,
         refreshBootstrap,
         toast,
         showToast,
