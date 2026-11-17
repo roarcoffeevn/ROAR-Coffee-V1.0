@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Copy, Search, Tag } from 'lucide-react';
 import { MediaImage } from '../components/MediaImage';
 import { useI18n } from '../i18n/I18nContext';
@@ -93,9 +93,15 @@ export const PromotionsPage: React.FC = () => {
 
 export const JournalPage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
+  const [searchParams] = useSearchParams();
   const [articles, setArticles] = useState<any[]>([]);
-  const [category, setCategory] = useState('all');
+  const [category, setCategory] = useState(() => searchParams.get('category') || 'all');
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    const qCat = searchParams.get('category');
+    if (qCat) setCategory(qCat);
+  }, [searchParams]);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -178,6 +184,7 @@ export const JournalPage: React.FC = () => {
 export const JournalArticlePage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const { lang, t, localePath } = useI18n();
+  const { setCustomBreadcrumb } = useStore();
   const [article, setArticle] = useState<any>(null);
   const [related, setRelated] = useState<any[]>([]);
 
@@ -193,6 +200,20 @@ export const JournalArticlePage: React.FC = () => {
         }
       });
   }, [slug, lang]);
+
+  useEffect(() => {
+    if (!article) return;
+    setCustomBreadcrumb([
+      { labelVi: 'Tạp chí Cà phê', labelEn: 'Coffee Journal', to: '/journal' },
+      {
+        labelVi: localizeJournalCategory(article.category, 'vi'),
+        labelEn: localizeJournalCategory(article.category, 'en'),
+        to: `/journal?category=${encodeURIComponent(article.category)}`,
+      },
+      { labelVi: article.title_vi, labelEn: article.title_en },
+    ]);
+    return () => setCustomBreadcrumb(null);
+  }, [article, setCustomBreadcrumb]);
 
   if (!article) {
     return <div className="max-w-[820px] mx-auto px-6 py-20 text-center text-sm">{t('Đang tải bài viết...', 'Loading article...')}</div>;

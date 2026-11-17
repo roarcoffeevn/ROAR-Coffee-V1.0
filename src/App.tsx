@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { AdaptiveLogo } from './components/AdaptiveLogo';
+import { Breadcrumb } from './components/Breadcrumb';
 import { CartDrawer } from './components/CartDrawer';
 import { Footer } from './components/Footer';
 import { Header } from './components/Header';
@@ -173,6 +174,7 @@ function AppLayout() {
     <div className="min-h-screen flex flex-col bg-[#F8F5EF] text-[#202020] dark:bg-[#0E1512] dark:text-[#F1EFEA] transition-colors duration-200">
       <RoarPreloader />
       <Header />
+      <Breadcrumb />
       <main className="flex-1">
         <Routes>
           <Route path="/">{renderPublicRoutes()}</Route>

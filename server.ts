@@ -19,8 +19,16 @@ import { db, initDatabase, logAudit } from './server/db.ts';
 initDatabase();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
+const portArgIdx = process.argv.indexOf('--port');
+const cliPort = portArgIdx >= 0 ? Number(process.argv[portArgIdx + 1]) : NaN;
+const envPort = Number(process.env.PORT);
+const PORT =
+  Number.isFinite(cliPort) && cliPort > 0
+    ? cliPort
+    : !IS_PROD && envPort === 8080
+      ? 3000
+      : envPort || 3000;
 const UPLOADS_DIR = path.resolve(process.cwd(), 'public/uploads');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 

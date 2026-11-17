@@ -128,6 +128,12 @@ export interface CoffeeOrigin {
   related_skus: string[];
 }
 
+export interface BreadcrumbNode {
+  labelVi: string;
+  labelEn: string;
+  to?: string;
+}
+
 interface StoreContextValue {
   user: AuthUser | null;
   authToken: string | null;
@@ -162,6 +168,8 @@ interface StoreContextValue {
   theme: 'light' | 'dark';
   setTheme: (next: 'light' | 'dark') => void;
   toggleTheme: () => void;
+  customBreadcrumb: BreadcrumbNode[] | null;
+  setCustomBreadcrumb: (nodes: BreadcrumbNode[] | null) => void;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -224,6 +232,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [loyaltySettings, setLoyaltySettings] = useState<any>(null);
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<string | null>(null);
+  const [customBreadcrumb, setCustomBreadcrumb] = useState<BreadcrumbNode[] | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -409,6 +418,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         theme,
         setTheme,
         toggleTheme,
+        customBreadcrumb,
+        setCustomBreadcrumb,
       }}
     >
       {children}

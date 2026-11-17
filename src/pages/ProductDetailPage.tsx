@@ -21,6 +21,7 @@ export const ProductDetailPage: React.FC = () => {
     user,
     apiFetch,
     showToast,
+    setCustomBreadcrumb,
   } = useStore();
 
   const [product, setProduct] = useState<Product | null>(null);
@@ -58,6 +59,22 @@ export const ProductDetailPage: React.FC = () => {
   useEffect(() => {
     fetchProduct();
   }, [slug]);
+
+  useEffect(() => {
+    if (!product) return;
+    const catNode =
+      product.category === 'green_bean'
+        ? { labelVi: 'Cà phê Nhân xanh B2B', labelEn: 'Green Coffee Matrix', to: '/coffee/green-beans' }
+        : product.category === 'instant'
+          ? { labelVi: 'Cà phê Hòa tan', labelEn: 'Instant Coffee', to: '/coffee/instant' }
+          : { labelVi: 'Cà phê Rang xay', labelEn: 'Roasted Coffee', to: '/coffee/roasted' };
+    setCustomBreadcrumb([
+      { labelVi: 'Cửa hàng', labelEn: 'Shop', to: '/shop' },
+      catNode,
+      { labelVi: product.name_vi, labelEn: product.name_en },
+    ]);
+    return () => setCustomBreadcrumb(null);
+  }, [product, setCustomBreadcrumb]);
 
   if (loading) {
     return <div className="max-w-[1280px] mx-auto px-6 py-20 text-center text-sm">{t('Đang tải sản phẩm...', 'Loading product...')}</div>;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { MediaImage } from '../components/MediaImage';
@@ -8,9 +8,21 @@ import { useStore } from '../context/StoreContext';
 export const PersonalitiesPage: React.FC = () => {
   const { slug } = useParams<{ slug?: string }>();
   const { lang, t, localePath } = useI18n();
-  const { personalities } = useStore();
+  const { personalities, setCustomBreadcrumb } = useStore();
 
   const selected = slug ? personalities.find((p) => p.slug === slug) : null;
+
+  useEffect(() => {
+    if (!selected) {
+      setCustomBreadcrumb(null);
+      return;
+    }
+    setCustomBreadcrumb([
+      { labelVi: '7 Cá Tính Thương Hiệu', labelEn: 'Seven Personalities', to: '/personalities' },
+      { labelVi: selected.animal_vi, labelEn: selected.animal_en },
+    ]);
+    return () => setCustomBreadcrumb(null);
+  }, [selected, setCustomBreadcrumb]);
 
   if (slug && selected) {
     const isPanther = selected.slug === 'black-panther';
