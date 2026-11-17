@@ -64,7 +64,7 @@ export const PersonalitiesPage: React.FC = () => {
               <p className={`text-sm font-medium ${isPanther ? 'text-[#C6A667]' : 'text-[#00552B] dark:text-[#C6A667]'}`}>
                 {lang === 'vi' ? selected.traits_vi : selected.traits_en}
               </p>
-              <p className={`text-base leading-relaxed ${isPanther ? 'text-[#F8F5EF]/85' : 'text-[#202020]/80 dark:text-[#F1EFEA]/80'}`}>
+              <p className={`text-base leading-relaxed whitespace-pre-line ${isPanther ? 'text-[#F8F5EF]/85' : 'text-[#202020]/80 dark:text-[#F1EFEA]/80'}`}>
                 {lang === 'vi' ? selected.story_vi : selected.story_en}
               </p>
 
@@ -144,7 +144,7 @@ export const PersonalitiesPage: React.FC = () => {
                   <h2 className="text-2xl font-bold">
                     {lang === 'vi' ? m.animal_vi : `${m.animal_en} · ${m.animal_vi}`}
                   </h2>
-                  <p className={`text-sm leading-relaxed ${isPanther ? 'text-[#F8F5EF]/80' : 'text-[#202020]/75 dark:text-[#F1EFEA]/75'}`}>
+                  <p className={`text-sm leading-relaxed whitespace-pre-line line-clamp-6 ${isPanther ? 'text-[#F8F5EF]/80' : 'text-[#202020]/75 dark:text-[#F1EFEA]/75'}`}>
                     {lang === 'vi' ? m.story_vi : m.story_en}
                   </p>
                 </div>

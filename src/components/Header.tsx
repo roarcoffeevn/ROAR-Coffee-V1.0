@@ -241,8 +241,8 @@ export const Header: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t(
-                  'Tìm theo tên cà phê, mã SKU (vd: RO-S18-HON), CBU, hoặc vùng nguyên liệu...',
-                  'Search coffee name, SKU (e.g. RO-S18-HON), CBU, or origin...'
+                  'Tìm theo tên cà phê, SKU (vd: RO-S18), Barcode EAN-13, CBU, hoặc vùng nguyên liệu...',
+                  'Search coffee name, SKU (e.g. RO-S18), Barcode, CBU, or origin...'
                 )}
                 className="flex-1 text-sm bg-transparent focus:outline-none text-[#202020] dark:text-[#F1EFEA]"
                 autoFocus
@@ -302,6 +302,11 @@ export const Header: React.FC = () => {
                   <li>
                     <Link to={localePath('/coffee/roasted')} onClick={closeAll} className="hover:text-[#00552B]">
                       {t('Tất cả dòng rang xay', 'All Roasted Collections')}
+                    </Link>
+                  </li>
+                  <li>
+                    <Link to={localePath('/coffee/roasted-beans')} onClick={closeAll} className="hover:text-[#00552B] font-semibold text-[#00552B] dark:text-[#C6A667]">
+                      {t('Cà Phê Hạt Rang (Bảng giá kg / Sỉ)', 'Roasted Coffee Beans (Kg Tiers)')}
                     </Link>
                   </li>
                 </ul>
@@ -588,6 +593,9 @@ export const Header: React.FC = () => {
                   <div className="pb-3 pl-3 space-y-2 text-[13px] font-normal text-[#202020]/80 dark:text-[#F1EFEA]/80">
                     <Link to={localePath('/coffee/roasted')} onClick={closeAll} className="block py-1">
                       {t('Cà phê rang xay', 'Roasted Coffee')}
+                    </Link>
+                    <Link to={localePath('/coffee/roasted-beans')} onClick={closeAll} className="block py-1 font-medium text-[#00552B] dark:text-[#C6A667]">
+                      {t('Cà phê Hạt rang (Sỉ/Lẻ theo kg)', 'Roasted Coffee Beans (Kg)')}
                     </Link>
                     <Link to={localePath('/coffee/green-beans')} onClick={closeAll} className="block py-1">
                       {t('Cà phê nhân xanh (S14/S16/S18)', 'Green Coffee Beans (27 SKUs)')}

@@ -400,12 +400,31 @@ export const CartPage: React.FC = () => {
                     {lang === 'vi' ? item.nameVi : item.nameEn}
                   </Link>
                   <p className="text-xs text-[#202020]/60 dark:text-[#F1EFEA]/60">{item.sku} · {localizeVariantLabel(item.variantLabel, lang)}</p>
+                  {(item.unit === 'kg' || (item.pricingTiers?.length || 0) > 0) && (
+                    <p className="text-[11px] font-mono text-[#00552B] dark:text-[#C6A667] mt-0.5 tabular-nums">
+                      {formatPrice(item.unitPriceVnd, item.unitPriceUsd)}/kg × {item.quantity} kg
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center border border-[#202020]/15 dark:border-white/15 rounded">
                   <button type="button" onClick={() => updateCartQty(item.productId, item.variantLabel, item.quantity - 1)} className="w-8 h-8 flex items-center justify-center cursor-pointer">
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="px-3 text-xs font-semibold tabular-nums">{item.quantity}</span>
+                  {item.unit === 'kg' || (item.pricingTiers?.length || 0) > 0 ? (
+                    <input
+                      type="number"
+                      min={1}
+                      max={100000}
+                      value={item.quantity}
+                      onChange={(e) => {
+                        const val = Math.floor(Number(e.target.value) || 0);
+                        if (val >= 1) updateCartQty(item.productId, item.variantLabel, val);
+                      }}
+                      className="w-14 text-center text-xs font-semibold bg-transparent focus:outline-none tabular-nums"
+                    />
+                  ) : (
+                    <span className="px-3 text-xs font-semibold tabular-nums">{item.quantity}</span>
+                  )}
                   <button type="button" onClick={() => updateCartQty(item.productId, item.variantLabel, item.quantity + 1)} className="w-8 h-8 flex items-center justify-center cursor-pointer">
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -765,88 +784,157 @@ export const CheckoutPage: React.FC = () => {
 export const OrderTrackPage: React.FC = () => {
   const { t, lang } = useI18n();
   const { formatPrice } = useStore();
-  const [orderNumber, setOrderNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [order, setOrder] = useState<any>(null);
+  const [lookupMode, setLookupMode] = useState<'orderNumber' | 'phone' | 'email'>('orderNumber');
+  const [queryValue, setQueryValue] = useState('');
+  const [orders, setOrders] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
 
   const handleTrack = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmed = queryValue.trim();
+    if (!trimmed) {
+      setError(t('Vui lòng nhập thông tin tra cứu.', 'Please enter a lookup value.'));
+      return;
+    }
     setError('');
-    const res = await fetch(`/api/orders/track?orderNumber=${encodeURIComponent(orderNumber)}&email=${encodeURIComponent(email)}`);
-    const d = await res.json();
-    if (res.ok) setOrder(d.order);
-    else {
-      setOrder(null);
-      setError(d.error || t('Không tìm thấy đơn hàng.', 'Order not found.'));
+    setSearching(true);
+    try {
+      const paramKey =
+        lookupMode === 'orderNumber' ? 'orderNumber' : lookupMode === 'phone' ? 'phone' : 'email';
+      const res = await fetch(`/api/orders/track?${paramKey}=${encodeURIComponent(trimmed)}`);
+      const d = await res.json();
+      if (res.ok) {
+        const list = Array.isArray(d.orders) ? d.orders : d.order ? [d.order] : [];
+        setOrders(list);
+        if (list.length === 0) {
+          setError(t('Không tìm thấy đơn hàng.', 'No matching orders found.'));
+        }
+      } else {
+        setOrders([]);
+        setError(d.error || t('Không tìm thấy đơn hàng.', 'Order not found.'));
+      }
+    } catch {
+      setOrders([]);
+      setError(t('Lỗi kết nối máy chủ.', 'Server connection error.'));
+    } finally {
+      setSearching(false);
     }
   };
 
   return (
-    <div className="max-w-[760px] mx-auto px-6 py-14 space-y-8">
+    <div className="max-w-[820px] mx-auto px-6 py-14 space-y-8">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold text-[#202020] dark:text-[#F1EFEA]">{t('Tra cứu Đơn hàng', 'Track Your Order')}</h1>
         <p className="text-sm text-[#202020]/70 dark:text-[#F1EFEA]/70">
-          {t('Nhập mã đơn hàng (vd: RC-20261101-1001) và email đặt hàng.', 'Enter your order number (e.g. RC-20261101-1001) and email address.')}
+          {t(
+            'Chọn 1 trong 3 điều kiện bên dưới để tra cứu nhanh tình trạng đơn hàng của bạn: Mã đơn hàng, Số điện thoại hoặc Email.',
+            'Choose any 1 of 3 conditions to track your order: Order Number, Phone Number, or Email.'
+          )}
         </p>
       </div>
 
-      <form onSubmit={handleTrack} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-        <input
-          type="text"
-          required
-          value={orderNumber}
-          onChange={(e) => setOrderNumber(e.target.value)}
-          placeholder="RC-YYYYMMDD-XXXX"
-          className="bg-white dark:bg-[#0E1512] border border-[#202020]/15 dark:border-white/15 rounded px-3 py-2 font-mono"
-        />
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="email@domain.com"
-          className="bg-white dark:bg-[#0E1512] border border-[#202020]/15 dark:border-white/15 rounded px-3 py-2"
-        />
-        <button type="submit" className="bg-[#00552B] text-white font-semibold rounded px-4 py-2 hover:bg-[#003D25] cursor-pointer">
-          {t('Tra cứu', 'Track Order')}
-        </button>
+      <form onSubmit={handleTrack} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-4 text-sm">
+        <div className="grid grid-cols-3 gap-2 p-1 rounded-lg bg-[#F8F5EF] dark:bg-[#0E1512]">
+          {[
+            { id: 'orderNumber', vi: '1. Mã đơn hàng', en: '1. Order Number' },
+            { id: 'phone', vi: '2. Số điện thoại', en: '2. Phone Number' },
+            { id: 'email', vi: '3. Email đặt hàng', en: '3. Email Address' },
+          ].map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => {
+                setLookupMode(m.id as 'orderNumber' | 'phone' | 'email');
+                setError('');
+              }}
+              className={`py-2 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
+                lookupMode === m.id
+                  ? 'bg-[#00552B] text-white'
+                  : 'text-[#202020]/75 dark:text-[#F1EFEA]/75 hover:text-[#202020] dark:hover:text-white'
+              }`}
+            >
+              {t(m.vi, m.en)}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            type={lookupMode === 'email' ? 'email' : lookupMode === 'phone' ? 'tel' : 'text'}
+            required
+            value={queryValue}
+            onChange={(e) => setQueryValue(e.target.value)}
+            placeholder={
+              lookupMode === 'orderNumber'
+                ? t('Nhập mã đơn hàng (vd: RC-20261101-1001)', 'Enter Order Number (e.g. RC-20261101-1001)')
+                : lookupMode === 'phone'
+                  ? t('Nhập số điện thoại đặt hàng (vd: 0901234567)', 'Enter Phone Number (e.g. +84 901 234 567)')
+                  : t('Nhập email đặt hàng (vd: member@roarcoffee.vn)', 'Enter Email Address (e.g. member@roarcoffee.vn)')
+            }
+            className="flex-1 bg-white dark:bg-[#0E1512] border border-[#202020]/15 dark:border-white/15 rounded px-3.5 py-2.5 font-mono"
+          />
+          <button
+            type="submit"
+            disabled={searching}
+            className="bg-[#00552B] text-white font-semibold rounded px-6 py-2.5 hover:bg-[#003D25] cursor-pointer disabled:opacity-50"
+          >
+            {searching ? t('Đang tra cứu...', 'Searching...') : t('Tra cứu đơn', 'Track Order')}
+          </button>
+        </div>
       </form>
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {order && (
-        <div className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#202020]/10 dark:border-white/10">
-            <div>
-              <span className="font-mono font-bold text-[#00552B] dark:text-[#C6A667]">{order.order_number}</span>
-              <p className="text-xs text-[#202020]/60 dark:text-[#F1EFEA]/60">{order.created_at}</p>
-            </div>
-            <div className="text-right text-xs">
-              <span className="font-semibold text-[#202020] dark:text-[#F1EFEA] block">{t('Trạng thái:', 'Status:')} {localizeOrderStatus(order.order_status, lang)}</span>
-              {order.tracking_code && <span className="font-mono text-[#00552B] dark:text-[#C6A667]">{t('Mã vận đơn:', 'Tracking:')} {order.tracking_code}</span>}
-            </div>
-          </div>
-          <div className="space-y-2 text-sm">
-            {(order.items || []).map((it: any) => (
-              <div key={it.id} className="flex justify-between">
-                <span>{lang === 'vi' ? it.product_name_vi : it.product_name_en} ({localizeVariantLabel(it.variant_label, lang)}) × {it.quantity}</span>
-                <span className="font-mono tabular-nums">{formatPrice(it.line_total_vnd)}</span>
+      {orders.length > 0 && (
+        <div className="space-y-6">
+          <p className="text-xs font-semibold text-[#00552B] dark:text-[#C6A667]">
+            {t(`Tìm thấy ${orders.length} đơn hàng phù hợp:`, `Found ${orders.length} matching order(s):`)}
+          </p>
+          {orders.map((order) => (
+            <div key={order.id || order.order_number} className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#202020]/10 dark:border-white/10">
+                <div>
+                  <span className="font-mono font-bold text-[#00552B] dark:text-[#C6A667]">{order.order_number}</span>
+                  <p className="text-xs text-[#202020]/60 dark:text-[#F1EFEA]/60">
+                    {order.customer_name} · {order.customer_phone} · {order.created_at}
+                  </p>
+                </div>
+                <div className="text-right text-xs">
+                  <span className="font-semibold text-[#202020] dark:text-[#F1EFEA] block">
+                    {t('Trạng thái:', 'Status:')} {localizeOrderStatus(order.order_status, lang)}
+                  </span>
+                  {order.tracking_code && (
+                    <span className="font-mono text-[#00552B] dark:text-[#C6A667]">
+                      {t('Mã vận đơn:', 'Tracking:')} {order.tracking_code}
+                    </span>
+                  )}
+                </div>
               </div>
-            ))}
-          </div>
-          <div className="flex justify-between font-bold pt-3 border-t border-[#202020]/10 dark:border-white/10">
-            <span>{t('Tổng đơn', 'Total')}</span>
-            <span className="tabular-nums">{formatPrice(order.total)}</span>
-          </div>
+              <div className="space-y-2 text-sm">
+                {(order.items || []).map((it: any) => (
+                  <div key={it.id} className="flex justify-between gap-3">
+                    <span>
+                      {lang === 'vi' ? it.product_name_vi : it.product_name_en} ({localizeVariantLabel(it.variant_label, lang)}) × {it.quantity}
+                    </span>
+                    <span className="font-mono tabular-nums shrink-0">{formatPrice(it.line_total_vnd)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between font-bold pt-3 border-t border-[#202020]/10 dark:border-white/10">
+                <span>{t('Tổng đơn', 'Total')}</span>
+                <span className="tabular-nums">{formatPrice(order.total)}</span>
+              </div>
 
-          <PaymentQRPanel
-            orderNumber={order.order_number}
-            customerEmail={order.customer_email}
-            paymentMethod={order.payment_method}
-            totalVnd={order.total}
-            initialPaymentStatus={order.payment_status}
-          />
+              <PaymentQRPanel
+                orderNumber={order.order_number}
+                customerEmail={order.customer_email}
+                paymentMethod={order.payment_method}
+                totalVnd={order.total}
+                initialPaymentStatus={order.payment_status}
+              />
+            </div>
+          ))}
         </div>
       )}
     </div>

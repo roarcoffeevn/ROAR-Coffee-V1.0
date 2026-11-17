@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Barcode,
   ImagePlus,
   Languages,
   Plus,
@@ -18,6 +19,13 @@ import {
   resolveMediaUrl,
   type ProductGallerySlide,
 } from '../../lib/media';
+import {
+  buildFiveTierPrices,
+  generateEan13Barcode,
+  isValidEan13,
+  normalizeVolumeTiers,
+  type VolumePriceTier,
+} from '../../lib/pricing';
 import { localizeBrewingMethod } from '../../lib/i18nHelpers';
 import { useStore } from '../../context/StoreContext';
 import { useI18n } from '../../i18n/I18nContext';
@@ -116,9 +124,11 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
 
   // Form states
   const [sku, setSku] = useState('');
+  const [barcode, setBarcode] = useState('');
+  const [subCategory, setSubCategory] = useState('');
   const [slug, setSlug] = useState('');
   const [slugEdited, setSlugEdited] = useState(false);
-  const [category, setCategory] = useState<'roasted' | 'instant' | 'green_bean'>('roasted');
+  const [category, setCategory] = useState<'roasted' | 'roasted_beans' | 'instant' | 'green_bean'>('roasted');
   const [nameVi, setNameVi] = useState('');
   const [nameEn, setNameEn] = useState('');
   const [subtitleVi, setSubtitleVi] = useState('');
@@ -134,6 +144,7 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
   const [moq, setMoq] = useState('1');
   const [status, setStatus] = useState('active');
   const [variants, setVariants] = useState<VariantItem[]>([]);
+  const [pricingTiers, setPricingTiers] = useState<VolumePriceTier[]>([]);
 
   // Media states
   const [imageKey, setImageKey] = useState('product_robusta_house');
@@ -181,6 +192,8 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
 
     if (product) {
       setSku(product.sku || '');
+      setBarcode(product.barcode || '');
+      setSubCategory(product.sub_category || '');
       setSlug(product.slug || '');
       setSlugEdited(true);
       setCategory(product.category || 'roasted');
@@ -204,6 +217,13 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
       setMoq(product.moq || '1');
       setStatus(product.status || 'active');
       setVariants(Array.isArray(product.variants) ? product.variants : []);
+      setPricingTiers(
+        Array.isArray(product.pricing_tiers) && product.pricing_tiers.length > 0
+          ? normalizeVolumeTiers(product.pricing_tiers, effectiveVcbRate)
+          : product.category === 'roasted_beans'
+            ? buildFiveTierPrices([240000, 225000, 210000, 195000, 180000], effectiveVcbRate)
+            : []
+      );
 
       setImageKey(product.image_key || 'product_robusta_house');
       const normalized = normalizeGallerySlides(product.gallery_images);
@@ -234,6 +254,8 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
       setBrewingMethods(Array.isArray(product.brewing_methods) ? product.brewing_methods : []);
     } else {
       setSku('');
+      setBarcode(generateEan13Barcode(Date.now()));
+      setSubCategory('');
       setSlug('');
       setSlugEdited(false);
       setCategory('roasted');
@@ -255,6 +277,7 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
       setMoq('1');
       setStatus('active');
       setVariants([{ label: '250g · Hạt nguyên chất', priceVnd: initVnd, priceUsd: initUsd }]);
+      setPricingTiers([]);
 
       setImageKey('product_robusta_house');
       setCustomGallery([]);
@@ -597,12 +620,29 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
         priceUsd: calcUsdByVcb(v.priceVnd, r),
       }))
     );
+    setPricingTiers((prev) =>
+      prev.map((tier) => ({
+        ...tier,
+        priceUsd: calcUsdByVcb(tier.priceVnd, r),
+      }))
+    );
     showToast(
       t(
         `Đã quy đổi giá USD theo tỉ giá Vietcombank (1 USD = ${r.toLocaleString('vi-VN')} ₫)`,
         `Converted all USD prices at Vietcombank rate (1 USD = ${r.toLocaleString('en-US')} VND)`
       )
     );
+  };
+
+  const updatePricingTierRow = (idx: number, patch: Partial<VolumePriceTier>) => {
+    setPricingTiers((prev) => {
+      const next = prev.map((tier, i) => (i === idx ? { ...tier, ...patch } : tier));
+      if (idx === 0 && patch.priceVnd !== undefined && category === 'roasted_beans') {
+        setPriceVnd(patch.priceVnd);
+        setPriceUsd(patch.priceUsd ?? calcUsdByVcb(patch.priceVnd, effectiveVcbRate));
+      }
+      return next;
+    });
   };
 
   const toggleBrewMethod = (m: string) => {
@@ -660,8 +700,19 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
         }
       }
 
+      const cleanedTiers =
+        category === 'roasted_beans' || pricingTiers.length > 0
+          ? pricingTiers.filter((t) => Number(t.priceVnd) > 0)
+          : [];
+      const effectivePriceVnd =
+        category === 'roasted_beans' && cleanedTiers.length > 0 ? cleanedTiers[0].priceVnd : Number(priceVnd || 0);
+      const effectivePriceUsd =
+        category === 'roasted_beans' && cleanedTiers.length > 0 ? cleanedTiers[0].priceUsd : Number(priceUsd || 0);
+
       const payload = {
         sku: sku.trim(),
+        barcode: barcode.trim(),
+        sub_category: subCategory.trim(),
         slug: (slug.trim() || toSafeSlugClient(nameVi) || sku.trim()).toLowerCase(),
         category,
         name_vi: nameVi.trim(),
@@ -672,12 +723,13 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
         description_en: finalDescEn || descriptionVi.trim(),
         mascot_slug: mascotSlug,
         featured,
-        price_vnd: Number(priceVnd || 0),
-        price_usd: Number(priceUsd || 0),
+        price_vnd: effectivePriceVnd,
+        price_usd: effectivePriceUsd,
         inventory: Number(inventory || 0),
         moq: moq.trim() || '1',
         status,
         variants: variants.filter((v) => v.label.trim().length > 0),
+        pricing_tiers: cleanedTiers,
         image_key: imageKey,
         gallery_images: galleryCustomized ? customGallery : [],
         coffee_type: coffeeType,
@@ -890,7 +942,7 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
                     required
                     value={sku}
                     onChange={(e) => setSku(e.target.value.toUpperCase())}
-                    placeholder="RC-RST-ESP"
+                    placeholder="RC-RBN-ROS18"
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono"
                   />
                 </div>
@@ -908,14 +960,109 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
                   />
                 </div>
 
+                {/* Barcode EAN-13 + Visual Barcode Strip */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="font-semibold text-slate-800 inline-flex items-center gap-1.5">
+                      <Barcode className="w-4 h-4 text-[#00552B]" />
+                      <span>{t('Mã Barcode sản phẩm (EAN-13)', 'Product Barcode (EAN-13)')}</span>
+                    </label>
+                    {barcode.trim() && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          isValidEan13(barcode)
+                            ? 'bg-emerald-100 text-[#00552B]'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {isValidEan13(barcode) ? t('Chuẩn EAN-13 hợp lệ', 'Valid EAN-13') : t('Mã tùy chỉnh', 'Custom code')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={barcode}
+                      onChange={(e) => setBarcode(e.target.value.replace(/\s+/g, ''))}
+                      placeholder="8938551000017"
+                      className="flex-1 border border-slate-200 bg-white rounded-lg px-3 py-1.5 font-mono tabular-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setBarcode(generateEan13Barcode(sku || slug || Date.now()))}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold text-[11px] shrink-0 cursor-pointer"
+                    >
+                      {t('Tạo EAN-13', 'Generate')}
+                    </button>
+                  </div>
+                  {barcode.trim().length > 0 && (
+                    <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-3">
+                      <svg viewBox="0 0 180 28" className="h-7 w-40 shrink-0" aria-hidden="true">
+                        {barcode
+                          .trim()
+                          .split('')
+                          .flatMap((ch, ci) => {
+                            const code = ch.charCodeAt(0);
+                            return [0, 1, 2, 3].map((bit) => ({
+                              x: (ci * 4 + bit) * 3.3,
+                              w: ((code >> bit) & 1) === 1 ? 2.2 : 1.0,
+                              on: ((code + bit) % 2) === 0 || ci === 0 || ci === barcode.trim().length - 1,
+                            }));
+                          })
+                          .map((bar, bi) =>
+                            bar.on ? <rect key={bi} x={bar.x} y={1} width={bar.w} height={26} fill="#111827" /> : null
+                          )}
+                      </svg>
+                      <span className="font-mono text-xs font-bold tracking-[0.14em] text-slate-800 truncate">
+                        {barcode.trim()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    {t('Mã phân loại / Tham chiếu hạt (Sub-SKU)', 'Grade / Sub-category Code')}
+                  </label>
+                  <input
+                    type="text"
+                    value={subCategory}
+                    onChange={(e) => setSubCategory(e.target.value)}
+                    placeholder="VD: RO-S18, CU-S18, AR-S18-CBU..."
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {t('Hiển thị kèm SKU khi tra cứu mã tiêu chuẩn (như RO-S18, AR-S18-CBU).', 'Optional grade reference shown alongside SKU.')}
+                  </p>
+                </div>
+
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">{t('Danh mục sản phẩm', 'Category')}</label>
                   <select
                     value={category}
-                    onChange={(e) => setCategory(e.target.value as any)}
+                    onChange={(e) => {
+                      const nextCat = e.target.value as 'roasted' | 'roasted_beans' | 'instant' | 'green_bean';
+                      setCategory(nextCat);
+                      if (nextCat === 'roasted_beans' && pricingTiers.length === 0) {
+                        const baseSeed = priceVnd >= 100000 ? priceVnd : 240000;
+                        setPricingTiers(
+                          buildFiveTierPrices(
+                            [
+                              baseSeed,
+                              Math.round(baseSeed * 0.94),
+                              Math.round(baseSeed * 0.88),
+                              Math.round(baseSeed * 0.82),
+                              Math.round(baseSeed * 0.75),
+                            ],
+                            effectiveVcbRate
+                          )
+                        );
+                      }
+                    }}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2"
                   >
                     <option value="roasted">{t('Cà phê Rang xay', 'Roasted Coffee')}</option>
+                    <option value="roasted_beans">{t('Cà phê Hạt rang (5 mức giá theo kg)', 'Roasted Coffee Beans (5-tier kg)')}</option>
                     <option value="instant">{t('Cà phê Hòa tan', 'Instant Coffee')}</option>
                     <option value="green_bean">{t('Cà phê Nhân xanh B2B', 'Green Coffee Beans')}</option>
                   </select>
@@ -1243,6 +1390,112 @@ export const ProductEditorModal: React.FC<ProductEditorModalProps> = ({
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* 5-Tier Kg Volume Pricing Table (Roasted Coffee Beans) */}
+                <div className="space-y-3 pt-4 border-t border-slate-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2.5">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">
+                        {t('Bảng giá 5 mức theo số lượng kg (Cà phê Hạt rang / Sỉ)', '5-Tier Volume Pricing (per kg)')}
+                      </h4>
+                      <p className="text-slate-500">
+                        {t(
+                          'Tự động áp dụng theo số kg khách chọn trên website: 1 kg, 5–19 kg, 20–49 kg, 50–99 kg và Sỉ ≥100 kg.',
+                          'Auto-applied based on customer kg quantity: 1 kg, 5–19 kg, 20–49 kg, 50–99 kg, Wholesale ≥100 kg.'
+                        )}
+                      </p>
+                    </div>
+                    {pricingTiers.length === 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const baseSeed = priceVnd >= 100000 ? priceVnd : 240000;
+                          setPricingTiers(
+                            buildFiveTierPrices(
+                              [
+                                baseSeed,
+                                Math.round(baseSeed * 0.94),
+                                Math.round(baseSeed * 0.88),
+                                Math.round(baseSeed * 0.82),
+                                Math.round(baseSeed * 0.75),
+                              ],
+                              effectiveVcbRate
+                            )
+                          );
+                        }}
+                        className="px-3 py-1.5 rounded bg-[#00552B] text-white font-semibold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        {t('Khởi tạo bảng giá 5 mức kg', 'Enable 5-Tier Kg Pricing')}
+                      </button>
+                    ) : (
+                      category !== 'roasted_beans' && (
+                        <button
+                          type="button"
+                          onClick={() => setPricingTiers([])}
+                          className="px-2.5 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 font-semibold cursor-pointer"
+                        >
+                          {t('Tắt bảng giá kg', 'Remove Tier Pricing')}
+                        </button>
+                      )
+                    )}
+                  </div>
+
+                  {pricingTiers.length > 0 && (
+                    <div className="border border-emerald-200 rounded-xl overflow-x-auto bg-emerald-50/30">
+                      <table className="w-full text-xs">
+                        <thead className="bg-emerald-50 border-b border-emerald-200 text-[#003D25]">
+                          <tr>
+                            <th className="p-2.5 text-left">{t('Mức số lượng', 'Quantity Tier')}</th>
+                            <th className="p-2.5 text-left">{t('Khoảng kg', 'Kg Range')}</th>
+                            <th className="p-2.5 text-right">{t('Đơn giá / kg (VND)', 'Price / kg (VND)')}</th>
+                            <th className="p-2.5 text-right">{t('Đơn giá / kg (USD · VCB)', 'Price / kg (USD · VCB)')}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-emerald-100 bg-white">
+                          {pricingTiers.map((tier, idx) => (
+                            <tr key={`${tier.minKg}-${idx}`}>
+                              <td className="p-2.5 font-semibold text-slate-900">
+                                {lang === 'en' ? tier.labelEn : tier.labelVi}
+                              </td>
+                              <td className="p-2.5 font-mono text-slate-500">
+                                {tier.maxKg === null ? `≥ ${tier.minKg} kg` : `${tier.minKg} – ${tier.maxKg} kg`}
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1000}
+                                  value={tier.priceVnd}
+                                  onChange={(e) => {
+                                    const vnd = Math.max(0, Number(e.target.value));
+                                    updatePricingTierRow(idx, {
+                                      priceVnd: vnd,
+                                      priceUsd: calcUsdByVcb(vnd, effectiveVcbRate),
+                                    });
+                                  }}
+                                  className="w-32 text-right border border-slate-200 rounded px-2.5 py-1.5 font-mono tabular-nums font-semibold"
+                                />
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={tier.priceUsd}
+                                  onChange={(e) =>
+                                    updatePricingTierRow(idx, { priceUsd: Math.max(0, Number(e.target.value)) })
+                                  }
+                                  className="w-24 text-right border border-slate-200 rounded px-2.5 py-1.5 font-mono tabular-nums"
+                                />
                               </td>
                             </tr>
                           ))}

@@ -21,6 +21,7 @@ function getQuickInterlinks(cleanPath: string): QuickLink[] {
   ) {
     return [
       { labelVi: 'Rang xay', labelEn: 'Roasted', to: '/coffee/roasted' },
+      { labelVi: 'Hạt rang (kg)', labelEn: 'Roasted Beans', to: '/coffee/roasted-beans' },
       { labelVi: 'Hòa tan', labelEn: 'Instant', to: '/coffee/instant' },
       { labelVi: 'Nhân xanh 27 SKU', labelEn: '27-SKU Green', to: '/coffee/green-beans' },
       { labelVi: 'Ưu đãi & Voucher', labelEn: 'Offers', to: '/promotions' },
@@ -67,6 +68,12 @@ function getDefaultTrail(cleanPath: string): BreadcrumbNode[] {
     return [
       { labelVi: 'Cửa hàng', labelEn: 'Shop', to: '/shop' },
       { labelVi: 'Cà phê Rang xay', labelEn: 'Roasted Coffee' },
+    ];
+  }
+  if (cleanPath === '/coffee/roasted-beans') {
+    return [
+      { labelVi: 'Cửa hàng', labelEn: 'Shop', to: '/shop' },
+      { labelVi: 'Cà phê Hạt rang', labelEn: 'Roasted Coffee Beans' },
     ];
   }
   if (cleanPath === '/coffee/instant') {

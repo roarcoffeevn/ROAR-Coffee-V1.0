@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ALL_ADMIN_PERMISSIONS, ADMIN_ROLE_PRESETS, hashPassword } from './auth.ts';
 import { exportCmsSnapshotToDisk, restoreFromSnapshot } from './snapshot.ts';
+import { buildFiveTierPrices, generateEan13Barcode } from '../src/lib/pricing.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
@@ -49,7 +50,8 @@ export function initDatabase(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slug TEXT NOT NULL UNIQUE,
       sku TEXT NOT NULL UNIQUE,
-      category TEXT NOT NULL CHECK(category IN ('roasted', 'green_bean', 'instant')),
+      barcode TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL CHECK(category IN ('roasted', 'roasted_beans', 'green_bean', 'instant')),
       sub_category TEXT DEFAULT '',
       name_vi TEXT NOT NULL,
       name_en TEXT NOT NULL,
@@ -67,6 +69,7 @@ export function initDatabase(): void {
       tasting_notes_en TEXT DEFAULT '',
       brewing_methods_json TEXT NOT NULL DEFAULT '[]',
       variants_json TEXT NOT NULL DEFAULT '[]',
+      pricing_tiers_json TEXT NOT NULL DEFAULT '[]',
       packaging_options_json TEXT NOT NULL DEFAULT '[]',
       price_vnd INTEGER NOT NULL DEFAULT 0,
       price_usd REAL NOT NULL DEFAULT 0,
@@ -347,10 +350,119 @@ export function initDatabase(): void {
     );
   `);
 
+  ensureProductsSchemaUpgraded();
   restoreFromSnapshot(db);
   seedInitialData();
   runIncrementalMigrations();
   exportCmsSnapshotToDisk(db);
+}
+
+function ensureProductsSchemaUpgraded(): void {
+  const tbl = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'").get() as { sql: string } | undefined;
+  if (tbl && !tbl.sql.includes("'roasted_beans'")) {
+    const existingCols = (db.prepare('PRAGMA table_info(products)').all() as Array<{ name: string }>).map((c) => c.name);
+    const hasBarcode = existingCols.includes('barcode');
+    const hasPricingTiers = existingCols.includes('pricing_tiers_json');
+    const hasGallery = existingCols.includes('gallery_images_json');
+
+    db.pragma('foreign_keys = OFF');
+    const migrateTx = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE products_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          slug TEXT NOT NULL UNIQUE,
+          sku TEXT NOT NULL UNIQUE,
+          barcode TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL CHECK(category IN ('roasted', 'roasted_beans', 'green_bean', 'instant')),
+          sub_category TEXT DEFAULT '',
+          name_vi TEXT NOT NULL,
+          name_en TEXT NOT NULL,
+          subtitle_vi TEXT DEFAULT '',
+          subtitle_en TEXT DEFAULT '',
+          description_vi TEXT NOT NULL,
+          description_en TEXT NOT NULL,
+          coffee_type TEXT NOT NULL,
+          blend_summary_vi TEXT DEFAULT '',
+          blend_summary_en TEXT DEFAULT '',
+          blend_public INTEGER NOT NULL DEFAULT 1,
+          roast_profile_vi TEXT DEFAULT '',
+          roast_profile_en TEXT DEFAULT '',
+          tasting_notes_vi TEXT DEFAULT '',
+          tasting_notes_en TEXT DEFAULT '',
+          brewing_methods_json TEXT NOT NULL DEFAULT '[]',
+          variants_json TEXT NOT NULL DEFAULT '[]',
+          pricing_tiers_json TEXT NOT NULL DEFAULT '[]',
+          packaging_options_json TEXT NOT NULL DEFAULT '[]',
+          price_vnd INTEGER NOT NULL DEFAULT 0,
+          price_usd REAL NOT NULL DEFAULT 0,
+          inventory INTEGER NOT NULL DEFAULT 0,
+          moq TEXT DEFAULT '1',
+          status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'configurable_on_request', 'out_of_stock', 'draft')),
+          is_demo_data INTEGER NOT NULL DEFAULT 1,
+          mascot_slug TEXT DEFAULT '',
+          screen_size TEXT DEFAULT '',
+          processing_method TEXT DEFAULT '',
+          origin_region TEXT DEFAULT '',
+          harvest_year TEXT DEFAULT 'Pending verified lot',
+          moisture_content TEXT DEFAULT 'Pending verified COA',
+          density TEXT DEFAULT 'Pending verified COA',
+          defect_info TEXT DEFAULT 'Pending verified COA',
+          grading_spec TEXT DEFAULT 'TCVN / Export grade configurable',
+          image_key TEXT NOT NULL DEFAULT 'product_robusta_house',
+          gallery_images_json TEXT NOT NULL DEFAULT '[]',
+          featured INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO products_new (
+          id, slug, sku, barcode, category, sub_category, name_vi, name_en, subtitle_vi, subtitle_en,
+          description_vi, description_en, coffee_type, blend_summary_vi, blend_summary_en, blend_public,
+          roast_profile_vi, roast_profile_en, tasting_notes_vi, tasting_notes_en,
+          brewing_methods_json, variants_json, pricing_tiers_json, packaging_options_json,
+          price_vnd, price_usd, inventory, moq, status, is_demo_data,
+          mascot_slug, screen_size, processing_method, origin_region,
+          harvest_year, moisture_content, density, defect_info, grading_spec,
+          image_key, gallery_images_json, featured, created_at
+        )
+        SELECT
+          id, slug, sku, ${hasBarcode ? "COALESCE(barcode, '')" : "''"}, category, COALESCE(sub_category, ''),
+          name_vi, name_en, COALESCE(subtitle_vi, ''), COALESCE(subtitle_en, ''),
+          description_vi, description_en, coffee_type,
+          COALESCE(blend_summary_vi, ''), COALESCE(blend_summary_en, ''), COALESCE(blend_public, 1),
+          COALESCE(roast_profile_vi, ''), COALESCE(roast_profile_en, ''),
+          COALESCE(tasting_notes_vi, ''), COALESCE(tasting_notes_en, ''),
+          COALESCE(brewing_methods_json, '[]'), COALESCE(variants_json, '[]'),
+          ${hasPricingTiers ? "COALESCE(pricing_tiers_json, '[]')" : "'[]'"},
+          COALESCE(packaging_options_json, '[]'),
+          COALESCE(price_vnd, 0), COALESCE(price_usd, 0), COALESCE(inventory, 0), COALESCE(moq, '1'),
+          COALESCE(status, 'active'), COALESCE(is_demo_data, 1),
+          COALESCE(mascot_slug, ''), COALESCE(screen_size, ''), COALESCE(processing_method, ''), COALESCE(origin_region, ''),
+          COALESCE(harvest_year, 'Pending verified lot'), COALESCE(moisture_content, 'Pending verified COA'),
+          COALESCE(density, 'Pending verified COA'), COALESCE(defect_info, 'Pending verified COA'),
+          COALESCE(grading_spec, ''), COALESCE(image_key, 'product_robusta_house'),
+          ${hasGallery ? "COALESCE(gallery_images_json, '[]')" : "'[]'"},
+          COALESCE(featured, 0), COALESCE(created_at, datetime('now'))
+        FROM products;
+
+        DROP TABLE products;
+        ALTER TABLE products_new RENAME TO products;
+      `);
+    });
+    migrateTx();
+    db.pragma('foreign_keys = ON');
+    db.pragma('foreign_key_check');
+  } else if (tbl) {
+    const cols = (db.prepare('PRAGMA table_info(products)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!cols.includes('barcode')) {
+      db.exec("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''");
+    }
+    if (!cols.includes('pricing_tiers_json')) {
+      db.exec("ALTER TABLE products ADD COLUMN pricing_tiers_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!cols.includes('gallery_images_json')) {
+      db.exec("ALTER TABLE products ADD COLUMN gallery_images_json TEXT NOT NULL DEFAULT '[]'");
+    }
+  }
 }
 
 function seedInitialData(): void {
@@ -994,117 +1106,23 @@ function seedInitialData(): void {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    insertPers.run(
-      'tiger',
-      'Tiger',
-      'Hổ',
-      'Mạnh mẽ · Quyết đoán · Bản lĩnh',
-      'Boldness · Strength · Determination',
-      'Hổ đại diện cho nguồn năng lượng tiên phong và ý chí không lùi bước. Mỗi ngụm cà phê gắn với biểu tượng Hổ là lời khẳng định sức mạnh nội tại trước mọi thử thách.',
-      'The Tiger embodies decisive momentum and unyielding courage — crafted for those who step into every morning with clarity, resolve, and bold presence.',
-      'ROAR COFFEE ĐẬM',
-      'ROAR COFFEE ĐẬM',
-      'roar-dam-bold',
-      0,
-      'mascot_tiger',
-      1
-    );
-
-    insertPers.run(
-      'lion',
-      'Lion',
-      'Sư Tử',
-      'Lãnh đạo · Tự tin · Uy nghi',
-      'Leadership · Confidence · Authority',
-      'Sư Tử tôn vinh phong thái điềm tĩnh của người dẫn đầu. Gắn liền với nét truyền thống của Phin Việt Nam, từng giọt cà phê chậm rãi mà đầy uy lực.',
-      'The Lion honors the composed authority of true leadership, anchored in the patient, deliberate ritual of the traditional Vietnamese Phin.',
-      'ROAR COFFEE PHIN',
-      'ROAR COFFEE PHIN',
-      'roar-phin-heritage',
-      0,
-      'mascot_lion',
-      2
-    );
-
-    insertPers.run(
-      'fox',
-      'Fox',
-      'Cáo',
-      'Thông minh · Linh hoạt · Sáng tạo',
-      'Intelligence · Agility · Creativity',
-      'Cáo đại diện cho tư duy nhạy bén, khả năng thích ứng nhanh và những ý tưởng đột phá — đồng hành cùng phong cách Espresso hiện đại và nhịp sống sáng tạo.',
-      'The Fox captures sharp intellect, creative agility, and modern adaptability — the natural companion to precision Espresso rituals.',
-      'ROAR COFFEE ESPRESSO',
-      'ROAR COFFEE ESPRESSO',
-      'roar-espresso',
-      0,
-      'mascot_fox',
-      3
-    );
-
-    insertPers.run(
-      'eagle',
-      'Eagle',
-      'Đại Bàng',
-      'Tầm nhìn · Tham vọng · Bứt phá',
-      'Vision · Ambition · Excellence',
-      'Đại Bàng nhìn xa vượt qua những giới hạn quen thuộc. Biểu tượng cho khát vọng vươn tầm quốc tế và chuẩn mực chiết xuất tinh hoa trong Espresso Gold.',
-      'The Eagle sees beyond immediate horizons — representing international ambition, elevated standards, and the pursuit of excellence in Espresso Gold.',
-      'ROAR COFFEE ESPRESSO GOLD',
-      'ROAR COFFEE ESPRESSO GOLD',
-      'roar-espresso-gold',
-      0,
-      'mascot_eagle',
-      4
-    );
-
-    insertPers.run(
-      'wolf',
-      'Wolf',
-      'Sói',
-      'Độc lập · Kiên định · Bền bỉ',
-      'Independence · Resilience · Determination',
-      'Sói là biểu tượng của sự bền bỉ âm thầm, trung thành với giá trị cốt lõi và kiên định trên hành trình dài hơi. Thuộc bộ sưu tập tương lai đang được nghiên cứu phát triển.',
-      'The Wolf stands for quiet endurance, loyalty to craft, and unshakeable resilience across long journeys. Reserved for an upcoming ROAR COFFEE collection.',
-      'Bộ sưu tập tương lai (Sắp ra mắt)',
-      'Future Collection (Coming Soon)',
-      '',
-      1,
-      'mascot_wolf',
-      5
-    );
-
-    insertPers.run(
-      'owl',
-      'Owl',
-      'Cú Mèo',
-      'Trí tuệ · Sâu sắc · Tinh tế · Chiêm nghiệm',
-      'Wisdom · Insight · Refinement · Contemplation',
-      'Cú Mèo đại diện cho trí tuệ tĩnh tại, sự thấu suốt và khả năng thưởng thức những tầng hương vị tinh tế nhất của hạt cà phê trong khoảnh khắc chiêm nghiệm sâu sắc.',
-      'The Owl communicates calm intellect, depth, discernment, and a contemplative appreciation of nuanced coffee craftsmanship. Reserved for a future collection.',
-      'Bộ sưu tập tương lai (Sắp ra mắt)',
-      'Future Collection (Coming Soon)',
-      '',
-      1,
-      'mascot_owl',
-      6
-    );
-
-    insertPers.run(
-      'black-panther',
-      'Black Panther',
-      'Báo Đen',
-      'Quý hiếm · Bí ẩn · Tinh tế · Khác biệt',
-      'Exclusivity · Mystery · Sophistication · Distinction',
-      'Báo Đen là biểu tượng tối thượng của Signature Reserve: chuẩn mực sang trọng trong sắc đen huyền bí và vàng champagne, nơi 60% Robusta, 20% Culi và 20% Arabica hội tụ.',
-      'The Black Panther embodies Signature Reserve: rare poise in obsidian black and champagne gold, uniting 60% Robusta, 20% Culi, and 20% Arabica.',
-      'ROAR COFFEE SIGNATURE RESERVE',
-      'ROAR COFFEE SIGNATURE RESERVE',
-      'signature-reserve',
-      0,
-      'mascot_panther',
-      7
-    );
+    for (const p of DEEP_PERSONALITY_SEEDS) {
+      insertPers.run(
+        p.slug,
+        p.animal_en,
+        p.animal_vi,
+        p.traits_vi,
+        p.traits_en,
+        p.story_vi,
+        p.story_en,
+        p.product_association_vi,
+        p.product_association_en,
+        p.associated_product_slug,
+        p.is_future_collection,
+        p.image_key,
+        p.sort_order
+      );
+    }
   }
 
   const promoCount = (db.prepare('SELECT COUNT(*) as c FROM promotions').get() as { c: number }).c;
@@ -2400,4 +2418,433 @@ function runIncrementalMigrations(): void {
       JSON.stringify(p.sections)
     );
   }
+
+  // 7. Upgrade short starter personality stories to deep multi-paragraph narratives (preserve admin custom edits)
+  const updatePersStory = db.prepare(`
+    UPDATE personalities
+    SET story_vi = ?, story_en = ?, traits_vi = ?, traits_en = ?
+    WHERE slug = ? AND LENGTH(story_vi) < 300
+  `);
+  for (const p of DEEP_PERSONALITY_SEEDS) {
+    updatePersStory.run(p.story_vi, p.story_en, p.traits_vi, p.traits_en, p.slug);
+  }
+
+  // 8. Seed 6 Roasted Coffee Beans (Cà phê Hạt rang) SKUs with 5-tier kg pricing idempotently
+  const vcbSetting = db.prepare("SELECT value FROM site_settings WHERE key = 'vcb_usd_sell'").get() as { value: string } | undefined;
+  const activeVcbRate = Number(vcbSetting?.value) || 25930;
+
+  const insertRoastedBean = db.prepare(`
+    INSERT OR IGNORE INTO products (
+      slug, sku, barcode, category, sub_category, name_vi, name_en, subtitle_vi, subtitle_en,
+      description_vi, description_en, coffee_type, blend_summary_vi, blend_summary_en, blend_public,
+      roast_profile_vi, roast_profile_en, tasting_notes_vi, tasting_notes_en,
+      brewing_methods_json, variants_json, pricing_tiers_json, packaging_options_json,
+      price_vnd, price_usd, inventory, moq, status, is_demo_data,
+      mascot_slug, screen_size, processing_method, origin_region,
+      harvest_year, moisture_content, density, defect_info, grading_spec,
+      image_key, gallery_images_json, featured
+    ) VALUES (?, ?, ?, 'roasted_beans', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '1 kg', 'active', 1, '', ?, ?, ?, ?, 'N/A (Roasted Beans)', 'N/A (Roasted Beans)', '< 0.5% lỗi hạt chín sau rang', ?, 'product_roasting_drum_clean', '[]', ?)
+  `);
+
+  for (const rb of ROASTED_COFFEE_BEANS_SEEDS) {
+    const tiers = buildFiveTierPrices(rb.tierPricesVnd, activeVcbRate);
+    const tier1 = tiers[0];
+    const variants = tiers.map((t) => ({
+      label: t.labelVi,
+      priceVnd: t.priceVnd,
+      priceUsd: t.priceUsd,
+    }));
+    insertRoastedBean.run(
+      rb.slug,
+      rb.sku,
+      rb.barcode,
+      rb.gradeCode,
+      rb.name_vi,
+      rb.name_en,
+      rb.subtitle_vi,
+      rb.subtitle_en,
+      rb.description_vi,
+      rb.description_en,
+      rb.coffee_type,
+      rb.blend_summary_vi,
+      rb.blend_summary_en,
+      rb.roast_profile_vi,
+      rb.roast_profile_en,
+      rb.tasting_notes_vi,
+      rb.tasting_notes_en,
+      JSON.stringify(rb.brewing_methods),
+      JSON.stringify(variants),
+      JSON.stringify(tiers),
+      JSON.stringify(['1 kg', '5 kg', '20 kg', '50 kg', '100 kg+']),
+      tier1.priceVnd,
+      tier1.priceUsd,
+      rb.inventory,
+      rb.screen_size,
+      rb.processing_method,
+      rb.origin_region,
+      rb.harvest_year,
+      rb.grading_spec,
+      rb.featured
+    );
+  }
+
+  // Ensure any existing roasted_beans rows without pricing_tiers_json get synced tiers
+  const existingRb = db.prepare("SELECT id, slug, pricing_tiers_json FROM products WHERE category = 'roasted_beans'").all() as Array<{
+    id: number;
+    slug: string;
+    pricing_tiers_json: string;
+  }>;
+  for (const row of existingRb) {
+    if (!row.pricing_tiers_json || row.pricing_tiers_json === '[]') {
+      const match = ROASTED_COFFEE_BEANS_SEEDS.find((rb) => rb.slug === row.slug);
+      if (match) {
+        const tiers = buildFiveTierPrices(match.tierPricesVnd, activeVcbRate);
+        db.prepare('UPDATE products SET pricing_tiers_json = ? WHERE id = ?').run(JSON.stringify(tiers), row.id);
+      }
+    }
+  }
+
+  // 9. Backfill deterministic valid EAN-13 barcodes for all products missing a barcode
+  const missingBarcodeRows = db.prepare("SELECT id, sku FROM products WHERE barcode IS NULL OR TRIM(barcode) = ''").all() as Array<{
+    id: number;
+    sku: string;
+  }>;
+  if (missingBarcodeRows.length > 0) {
+    const updBarcode = db.prepare('UPDATE products SET barcode = ? WHERE id = ?');
+    for (const row of missingBarcodeRows) {
+      updBarcode.run(generateEan13Barcode(row.id * 17 + 100), row.id);
+    }
+  }
 }
+
+const DEEP_PERSONALITY_SEEDS = [
+  {
+    slug: 'tiger',
+    animal_en: 'Tiger',
+    animal_vi: 'Hổ',
+    traits_vi: 'Mạnh mẽ · Quyết đoán · Bản lĩnh · Tiên phong',
+    traits_en: 'Boldness · Strength · Determination · Vanguard',
+    story_vi:
+      'Trong khu rừng nguyên sinh của hương vị cà phê Việt, Hổ không ồn ào phô trương mà bước đi bằng nội lực trầm ổn và sự tập trung tuyệt đối. Khi bình minh chưa kịp ló rạng trên cao nguyên bazan đỏ, người mang khí chất Hổ đã sẵn sàng khởi đầu ngày mới với mục tiêu rõ ràng và ý chí không thỏa hiệp.\n\nTinh thần ấy được chuyển hóa trọn vẹn vào dòng ROAR COFFEE ĐẬM: nền Robusta chọn lọc từ Đắk Lắk rang ở mức đậm chuẩn xác (Full City+), giải phóng nốt sô-cô-la đen đặc quánh, đường nâu cháy nhẹ và lớp crema dày dặn kéo dài nơi hậu vị. Từng ngụm cà phê như cú bật dứt khoát đánh thức sự tỉnh táo tức thì.\n\nDù bạn thưởng thức một ly cà phê đen đá cô đặc trước cuộc họp chiến lược hay nạp năng lượng cho buổi tập cường độ cao, biểu tượng Hổ luôn là lời nhắc nhở về kỷ luật bản thân và bản lĩnh đứng vững trước mọi áp lực.',
+    story_en:
+      'Deep within the highland frontier of Vietnamese coffee, the Tiger moves with quiet intensity and unwavering focus. Long before dawn breaks over the red basalt plateaus, those who carry the Tiger temperament are already aligned with their mission—decisive, disciplined, and unafraid of demanding terrain.\n\nThat ethos lives inside ROAR COFFEE ĐẬM: carefully screened highland Robusta roasted to a deliberate Full City+ profile, unlocking dark cacao, toasted brown sugar, and a dense, lingering body. Every sip strikes with clean authority rather than harsh bitterness.\n\nWhether poured over ice before a high-stakes morning briefing or brewed strong to anchor a marathon creative sprint, the Tiger crest stands as an emblem of inner strength and relentless forward momentum.',
+    product_association_vi: 'ROAR COFFEE ĐẬM',
+    product_association_en: 'ROAR COFFEE ĐẬM',
+    associated_product_slug: 'roar-dam-bold',
+    is_future_collection: 0,
+    image_key: 'mascot_tiger',
+    sort_order: 1,
+  },
+  {
+    slug: 'lion',
+    animal_en: 'Lion',
+    animal_vi: 'Sư Tử',
+    traits_vi: 'Lãnh đạo · Tự tin · Uy nghi · Chuẩn mực',
+    traits_en: 'Leadership · Confidence · Authority · Heritage',
+    story_vi:
+      'Sư Tử không chạy theo nhịp vội vã của đám đông; quyền uy của người dẫn đầu nằm ở sự điềm tĩnh, tầm vóc vững chãi và khả năng giữ nhịp cho cả tập thể. Hình tượng Sư Tử tôn vinh nghi thức cà phê Phin truyền thống Việt Nam — nơi thời gian nhỏ giọt chậm rãi chính là thước đo của chiều sâu tư duy.\n\nGắn liền với ROAR COFFEE PHIN, công thức phối trộn cân bằng giữa độ đầm vị của Robusta truyền thống và hậu ngọt dịu từ hạt Culi chín mọng mang đến ly cà phê có cấu trúc tròn đầy, hương ca cao rang cùng gỗ tuyết tùng ấm áp.\n\nMỗi giọt cà phê rơi qua nắp gài nhôm Phin là khoảnh khắc người lãnh đạo quan sát bức tranh toàn cảnh trước khi đưa ra quyết định trọng đại — chậm rãi trong chuẩn bị, uy lực trong hành động.',
+    story_en:
+      'The Lion never rushes with the crowd; true authority resides in composure, steady presence, and the clarity to anchor an entire room. The Lion archetype honors Vietnam’s iconic Phin filter ritual—where every unhurried drop becomes an exercise in patience and strategic foresight.\n\nPaired with ROAR COFFEE PHIN, its balanced blend unites highland Robusta richness with rounded Culi sweetness, yielding warm cocoa aromatics, velvety mouthfeel, and cedarwood depth tailored for both black Phin and Cà Phê Sữa Đá.\n\nWatching each slow drip gather beneath the stainless press invites leaders and builders to pause, calibrate their vision, and act with unmistakable poise.',
+    product_association_vi: 'ROAR COFFEE PHIN',
+    product_association_en: 'ROAR COFFEE PHIN',
+    associated_product_slug: 'roar-phin-heritage',
+    is_future_collection: 0,
+    image_key: 'mascot_lion',
+    sort_order: 2,
+  },
+  {
+    slug: 'fox',
+    animal_en: 'Fox',
+    animal_vi: 'Cáo',
+    traits_vi: 'Thông minh · Linh hoạt · Sáng tạo · Nhạy bén',
+    traits_en: 'Intelligence · Agility · Creativity · Precision',
+    story_vi:
+      'Giữa thế giới thay đổi từng giờ, lợi thế thuộc về những tâm trí biết quan sát tinh tế và xoay chuyển linh hoạt. Cáo đại diện cho thế hệ sáng tạo, nhà thiết kế, lập trình viên và các Barista hiện đại — những người biến giới hạn kỹ thuật thành sân chơi của ý tưởng mới.\n\nHồ sơ rang của ROAR COFFEE ESPRESSO được thiết kế chuẩn xác cho biểu tượng Cáo: độ rang Medium-Dark giữ lại độ chua thanh thoát của Arabica cao nguyên hòa quyện cùng thân vị dày mượt của Robusta tuyển chọn, lý tưởng cho cả Espresso nguyên bản lẫn Flat White, Latte hay Cold Brew.\n\nMột shot Espresso 18g chiết xuất đúng 28 giây mở ra mùi hạnh nhân rang, caramel bơ và sô-cô-la sữa — tiếp lửa cho những buổi brainstorm sắc sảo và nhịp sống đô thị không ngừng chuyển động.',
+    story_en:
+      'In a world shifting by the hour, edge belongs to agile minds capable of reading subtle patterns and reinventing the playbook. The Fox celebrates modern creators, designers, engineers, and contemporary baristas who turn precision into creative freedom.\n\nCrafted around ROAR COFFEE ESPRESSO, this Medium-Dark profile harmonizes bright highland Arabica nuance with silky Robusta structure—performing seamlessly across straight double shots, velvety Flat Whites, and crisp iced tonics.\n\nDialed at 18g in to 36g out, it releases toasted almond, salted butter caramel, and milk chocolate notes designed to spark sharp intuition throughout fast-moving city days.',
+    product_association_vi: 'ROAR COFFEE ESPRESSO',
+    product_association_en: 'ROAR COFFEE ESPRESSO',
+    associated_product_slug: 'roar-espresso',
+    is_future_collection: 0,
+    image_key: 'mascot_fox',
+    sort_order: 3,
+  },
+  {
+    slug: 'eagle',
+    animal_en: 'Eagle',
+    animal_vi: 'Đại Bàng',
+    traits_vi: 'Tầm nhìn · Tham vọng · Bứt phá · Đỉnh cao',
+    traits_en: 'Vision · Ambition · Excellence · Mastery',
+    story_vi:
+      'Từ độ cao nghìn mét nhìn xuống toàn bộ dải đại ngàn, Đại Bàng không tìm kiếm con đường dễ dàng mà hướng tới những đỉnh cao đòi hỏi tiêu chuẩn khắt khe nhất. Đó cũng là triết lý đứng sau các lô hạt sàng S18 chế biến ướt (CBU) và Honey được chọn lọc nghiêm ngặt cho ROAR COFFEE ESPRESSO GOLD.\n\nVới kích thước hạt đồng đều trên sàng 18, từng mẻ rang được kiểm soát bằng đường nhiệt tinh chỉnh nhằm bảo toàn hương hoa cà phê, vị ngọt mật ong rừng và cấu trúc crema óng ánh như sắc vàng ròng dưới áp suất 9 bar.\n\nBiểu tượng Đại Bàng dành riêng cho các quầy bar tiêu chuẩn quốc tế, chuỗi HORECA cao cấp và những người thưởng thức luôn đặt chất lượng hoàn mỹ làm thước đo danh dự.',
+    story_en:
+      'Soaring above the mountain canopy, the Eagle commands panoramic perspective—drawn not to shortcuts, but to standards that demand disciplined mastery. That spirit guides the Grade S18 Washed (CBU) and Honey-processed highland lots selected for ROAR COFFEE ESPRESSO GOLD.\n\nWith uniform S18 bean geometry calibrated through precision roast curves, each batch preserves delicate floral lift, wildflower honey sweetness, and gleaming tiger-striped crema at 9 bars of pressure.\n\nThe Eagle crest is built for flagship hospitality bars, ambitious specialty venues, and discerning palates who treat excellence as non-negotiable.',
+    product_association_vi: 'ROAR COFFEE ESPRESSO GOLD',
+    product_association_en: 'ROAR COFFEE ESPRESSO GOLD',
+    associated_product_slug: 'roar-espresso-gold',
+    is_future_collection: 0,
+    image_key: 'mascot_eagle',
+    sort_order: 4,
+  },
+  {
+    slug: 'wolf',
+    animal_en: 'Wolf',
+    animal_vi: 'Sói',
+    traits_vi: 'Độc lập · Kiên định · Bền bỉ · Trung thành',
+    traits_en: 'Independence · Resilience · Endurance · Loyalty',
+    story_vi:
+      'Sói đại diện cho sức bền âm thầm nhưng không thể khuất phục trên những hành trình dài hơi. Trong bầy đàn, Sói tôn trọng kỷ luật và sự gắn kết; khi bước đi một mình giữa sương núi, Sói tin tưởng tuyệt đối vào bản năng được tôi luyện qua năm tháng.\n\nTrong vũ trụ cá tính ROAR COFFEE®, hình tượng Sói được dành riêng cho bộ sưu tập thử nghiệm tương lai — nơi các dòng hạt đơn nguồn (Single Origin) thu hái muộn ở độ cao 1.500m+ đang được ủ men và rang thử nghiệm để đạt cấu trúc vị trầm ấm, hậu vị dài bền bỉ.\n\nKhi bộ sưu tập Sói chính thức ra mắt, đó sẽ là người bạn đồng hành dành cho những nhà thám hiểm, người chạy đường dài và những tâm hồn bền gan giữ vững lý tưởng của mình.',
+    story_en:
+      'The Wolf embodies quiet, unbreakable endurance across demanding horizons. Within its pack, the Wolf honors loyalty and shared discipline; alone under misty mountain skies, it relies on instincts forged through patience and grit.\n\nWithin the ROAR COFFEE® personality universe, the Wolf is reserved for an upcoming experimental collection—spotlighting high-altitude (1,500m+) late-harvest single-origin lots currently undergoing small-batch fermentation and roast R&D.\n\nDesigned for long-haul builders, backcountry travelers, and independent thinkers, the Wolf edition will celebrate steadfast character from first bloom to final sip.',
+    product_association_vi: 'Bộ sưu tập tương lai (Sắp ra mắt)',
+    product_association_en: 'Future Collection (Coming Soon)',
+    associated_product_slug: '',
+    is_future_collection: 1,
+    image_key: 'mascot_wolf',
+    sort_order: 5,
+  },
+  {
+    slug: 'owl',
+    animal_en: 'Owl',
+    animal_vi: 'Cú Mèo',
+    traits_vi: 'Trí tuệ · Sâu sắc · Tinh tế · Chiêm nghiệm',
+    traits_en: 'Wisdom · Insight · Refinement · Contemplation',
+    story_vi:
+      'Khi màn đêm buông xuống và thế giới lắng lại, Cú Mèo mở rộng tầm nhìn để lắng nghe những chuyển động tinh vi mà ban ngày thường bỏ lỡ. Đó là biểu tượng của sự chiêm nghiệm sâu sắc, tri thức tĩnh tại và gu thưởng thức đặt trọng tâm vào tầng hương phức hợp thay vì cường độ mạnh bạo.\n\nDành cho bộ sưu tập tương lai hướng tới phương pháp Pour-over (V60, Kalita) và Cold Brew ủ lạnh 18 giờ, cá tính Cú Mèo tôn vinh mức rang sáng-vừa (Light-Medium) giúp từng lớp hương trà xanh, cam chanh chín và thảo mộc núi rừng hiện lên trong trẻo.\n\nBiểu tượng này dành tặng những giờ đọc sách yên ả, các phiên làm việc đêm khuya đầy minh mẫn và những cuộc trò chuyện tri âm bên tách cà phê thơm nhẹ.',
+    story_en:
+      'When evening settles and noise fades away, the Owl perceives subtle harmonies others overlook in daylight. It represents contemplative intelligence, unhurried wisdom, and a palate tuned toward aromatic clarity over sheer roast intensity.\n\nEnvisioned for an upcoming filter and 18-hour Cold Brew release, the Owl collection focuses on Light-Medium roast curves that elevate jasmine tea florals, candied citrus peel, and clean mountain-herb finish in V60 and Chemex pours.\n\nCrafted for quiet studio nights, reflective reading hours, and thoughtful dialogue shared over crystalline cups.',
+    product_association_vi: 'Bộ sưu tập tương lai (Sắp ra mắt)',
+    product_association_en: 'Future Collection (Coming Soon)',
+    associated_product_slug: '',
+    is_future_collection: 1,
+    image_key: 'mascot_owl',
+    sort_order: 6,
+  },
+  {
+    slug: 'black-panther',
+    animal_en: 'Black Panther',
+    animal_vi: 'Báo Đen',
+    traits_vi: 'Quý hiếm · Bí ẩn · Tinh tế · Độc bản',
+    traits_en: 'Exclusivity · Mystery · Sophistication · Distinction',
+    story_vi:
+      'Báo Đen là đỉnh cao quyền lực lặng lẽ trong bộ sưu tập ROAR COFFEE® — thanh lịch trong sắc đen huyền bí kết hợp ánh vàng champagne sang trọng. Không cần phô trương lời giới thiệu, sự hiện diện của Báo Đen tự thân đã định nghĩa đẳng cấp độc bản.\n\nTinh hoa ấy hội tụ trong ROAR COFFEE SIGNATURE RESERVE với tỷ lệ vàng 60% Robusta đậm đà, 20% Culi tròn vị và 20% Arabica thơm sâu: tạo nên hợp âm đa tầng từ nốt ca cao nguyên chất, vani ấm, trái cây sấy đến lớp hậu vị nhung lụa kéo dài hiếm thấy.\n\nĐược đóng hộp thiếc đen mờ dập nổi chuẩn quà tặng điều hành, Signature Reserve là tuyên ngôn phong cách cho những dịp ký kết quan trọng, phòng khách hạng sang và những người chỉ chọn điều tinh túy nhất.',
+    story_en:
+      'The Black Panther crowns the ROAR COFFEE® archetype pantheon—sleek in obsidian black and champagne gold, radiating rare poise without ever raising its voice. Its mere presence sets a benchmark of quiet distinction.\n\nThat artistry culminates in ROAR COFFEE SIGNATURE RESERVE, uniting an architectural triad of 60% bold Robusta, 20% velvety Culi Peaberry, and 20% aromatic Arabica. Together they compose layered notes of pure cacao nib, warm vanilla bean, dried fig, and a supple cashmere finish.\n\nPresented in matte obsidian canisters crafted for executive gifting and private tasting rooms, Signature Reserve belongs to milestone moments and collectors of the extraordinary.',
+    product_association_vi: 'ROAR COFFEE SIGNATURE RESERVE',
+    product_association_en: 'ROAR COFFEE SIGNATURE RESERVE',
+    associated_product_slug: 'signature-reserve',
+    is_future_collection: 0,
+    image_key: 'mascot_panther',
+    sort_order: 7,
+  },
+];
+
+const ROASTED_COFFEE_BEANS_SEEDS: Array<{
+  slug: string;
+  sku: string;
+  gradeCode: string;
+  barcode: string;
+  name_vi: string;
+  name_en: string;
+  subtitle_vi: string;
+  subtitle_en: string;
+  description_vi: string;
+  description_en: string;
+  coffee_type: string;
+  blend_summary_vi: string;
+  blend_summary_en: string;
+  roast_profile_vi: string;
+  roast_profile_en: string;
+  tasting_notes_vi: string;
+  tasting_notes_en: string;
+  brewing_methods: string[];
+  tierPricesVnd: [number, number, number, number, number];
+  inventory: number;
+  screen_size: string;
+  processing_method: string;
+  origin_region: string;
+  harvest_year: string;
+  grading_spec: string;
+  featured: number;
+}> = [
+  {
+    slug: 'roasted-beans-robusta-s18',
+    sku: 'RC-RBN-ROS18',
+    gradeCode: 'RO-S18',
+    barcode: generateEan13Barcode(9101),
+    name_vi: 'CÀ PHÊ HẠT RANG ROBUSTA S18',
+    name_en: 'ROASTED COFFEE BEANS ROBUSTA S18',
+    subtitle_vi: 'Mã phẩm cấp RO-S18 · Hạt rang nguyên chất sàng 18 tiêu chuẩn quán & rang xay sỉ',
+    subtitle_en: 'Grade RO-S18 · Screen 18 Whole Roasted Beans for Cafés & Wholesale',
+    description_vi:
+      'Hạt cà phê Robusta tuyển chọn kích thước sàng 18 (7.1mm) thu hoạch chín từ cao nguyên bazan Đắk Lắk – Gia Lai, rang công nghiệp kiểm soát hồi nhiệt giúp hạt chín đều từ tâm ra vỏ. Mang đến body dày đầm, lớp crema nâu hổ phách bền vững, vị đắng thanh sạch không khét, tối ưu cho pha máy Espresso phối trộn, pha Phin truyền thống và hệ thống chuỗi quán cà phê.',
+    description_en:
+      'Selected Screen 18 (7.1mm) highland Robusta harvested ripe across Đắk Lắk and Gia Lai, precision drum-roasted for uniform core development. Delivers heavy body, dense amber crema, clean dark-cacao bitterness, and reliable daily extraction for espresso blends, Vietnamese Phin, and high-volume café chains.',
+    coffee_type: '100% Robusta S18 (Hạt rang nguyên chất)',
+    blend_summary_vi: '100% Robusta sàng 18 · Thuần hạt rang nguyên chất không tẩm ướp',
+    blend_summary_en: '100% Screen 18 Robusta · Pure unflavored whole roasted beans',
+    roast_profile_vi: 'Rang Vừa-Đậm (Medium-Dark · Agtron ~48)',
+    roast_profile_en: 'Medium-Dark Roast (Agtron ~48)',
+    tasting_notes_vi: 'Sô-cô-la đen · Hạt dẻ rang · Đường thắng · Crema dày bền',
+    tasting_notes_en: 'Dark chocolate · Roasted hazelnut · Caramelized sugar · Heavy crema',
+    brewing_methods: ['Espresso', 'Vietnamese Phin', 'Moka Pot', 'Commercial Roasting'],
+    tierPricesVnd: [240000, 225000, 210000, 195000, 180000],
+    inventory: 1800,
+    screen_size: 'S18 (7.1mm)',
+    processing_method: 'Natural (Phơi giàn tự nhiên)',
+    origin_region: 'Đắk Lắk & Gia Lai',
+    harvest_year: 'Vụ mùa mới nhất (Rang tươi theo tuần)',
+    grading_spec: 'RO-S18 · Sàng 18 sạch tạp chất · Rang mới 100%',
+    featured: 1,
+  },
+  {
+    slug: 'roasted-beans-culi-s18',
+    sku: 'RC-RBN-CUS18',
+    gradeCode: 'CU-S18',
+    barcode: generateEan13Barcode(9102),
+    name_vi: 'CÀ PHÊ HẠT RANG CULI S18',
+    name_en: 'ROASTED COFFEE BEANS CULI S18',
+    subtitle_vi: 'Mã phẩm cấp CU-S18 · Hạt đơn tròn (Peaberry) rang mộc đậm đà chiều sâu',
+    subtitle_en: 'Grade CU-S18 · Screen 18 Peaberry Whole Roasted Beans',
+    description_vi:
+      'Hạt Culi đơn nhân tròn trịa được phân tách riêng qua hệ thống sàng trọng lực kích thước S18, tích tụ hàm lượng caffeine và tinh dầu tự nhiên cao hơn hạt dẹt thông thường. Quá trình rang kiểm soát tốc độ tăng nhiệt chậm ở giai đoạn Maillard cho tách cà phê sánh đậm, hương ca cao nồng nàn và hậu vị ngọt sâu lý tưởng cho cả uống thuần hoặc phối blend cao cấp.',
+    description_en:
+      'Density-sorted Screen 18 Peaberry (single-seed cherry) beans naturally richer in caffeine and essential oils. Slow Maillard-phase roasting locks in intense syrupy body, pronounced roasted cocoa aromatics, and a lingering sweet finish suited for straight Phin brewing or premium signature blends.',
+    coffee_type: '100% Culi / Peaberry S18 (Hạt rang nguyên chất)',
+    blend_summary_vi: '100% Culi sàng 18 chọn lọc hạt tròn đồng nhất',
+    blend_summary_en: '100% Screen 18 Peaberry · Uniform single-bean morphology',
+    roast_profile_vi: 'Rang Đậm chuẩn mực (Full City Roast · Agtron ~45)',
+    roast_profile_en: 'Full City Roast (Agtron ~45)',
+    tasting_notes_vi: 'Ca cao đắng · Gỗ tuyết tùng · Mạch nha · Caffeine đậm sâu',
+    tasting_notes_en: 'Bitter cocoa · Cedar spice · Dark malt · Concentrated body',
+    brewing_methods: ['Vietnamese Phin', 'Espresso', 'Moka Pot', 'Iced Milk Coffee'],
+    tierPricesVnd: [275000, 255000, 240000, 225000, 210000],
+    inventory: 1200,
+    screen_size: 'S18 Peaberry',
+    processing_method: 'Natural (Thu hái chín chọn lọc)',
+    origin_region: 'Đắk Lắk & Đắk Nông',
+    harvest_year: 'Vụ mùa mới nhất (Rang tươi theo tuần)',
+    grading_spec: 'CU-S18 · Culi sàng 18 tuyển chọn · Không độn bơ bắp',
+    featured: 1,
+  },
+  {
+    slug: 'roasted-beans-arabica-s18',
+    sku: 'RC-RBN-ARS18',
+    gradeCode: 'AR-S18',
+    barcode: generateEan13Barcode(9103),
+    name_vi: 'CÀ PHÊ HẠT RANG ARABICA S18',
+    name_en: 'ROASTED COFFEE BEANS ARABICA S18',
+    subtitle_vi: 'Mã phẩm cấp AR-S18 · Arabica Cầu Đất – Lâm Đồng hương hoa trái thanh tao',
+    subtitle_en: 'Grade AR-S18 · Highland Arabica Screen 18 Whole Roasted Beans',
+    description_vi:
+      'Tuyển chọn từ những vườn Arabica Catimor vùng cao Cầu Đất – Lạc Dương (Lâm Đồng) ở độ cao 1.450–1.600m, hạt đạt chuẩn sàng lớn S18. Hồ sơ rang Vừa (Medium) giữ trọn độ chua trái cây sáng mịn, mùi hoa cà phê và hương caramel ngọt dịu — lý tưởng cho quầy Espresso Specialty, Pour-over hoặc phối tăng hương cho gu máy hiện đại.',
+    description_en:
+      'High-elevation Screen 18 Catimor Arabica grown across Cầu Đất and Lạc Dương (1,450–1,600m, Lâm Đồng). Roasted to a balanced Medium profile to showcase sparkling citrus acidity, coffee-blossom aromatics, and clean milk-chocolate sweetness for specialty espresso and filter bars.',
+    coffee_type: '100% Arabica S18 (Hạt rang nguyên chất)',
+    blend_summary_vi: '100% Arabica sàng 18 Cầu Đất – Lâm Đồng thuần chất',
+    blend_summary_en: '100% Highland Arabica Screen 18 · Single-region origin',
+    roast_profile_vi: 'Rang Vừa (Medium Roast · Agtron ~58)',
+    roast_profile_en: 'Medium Roast (Agtron ~58)',
+    tasting_notes_vi: 'Hoa nhài · Cam chín · Sô-cô-la sữa · Hậu ngọt thanh',
+    tasting_notes_en: 'Jasmine blossom · Ripe citrus · Milk chocolate · Clean sweet finish',
+    brewing_methods: ['Espresso', 'Pour-over', 'Cold Brew', 'French Press'],
+    tierPricesVnd: [360000, 335000, 315000, 295000, 275000],
+    inventory: 950,
+    screen_size: 'S18 (7.1mm+)',
+    processing_method: 'Washed / Natural Highland Lot',
+    origin_region: 'Cầu Đất – Lâm Đồng',
+    harvest_year: 'Vụ mùa mới nhất (Rang tươi theo tuần)',
+    grading_spec: 'AR-S18 · Arabica sàng 18 tuyển chọn cao nguyên',
+    featured: 1,
+  },
+  {
+    slug: 'roasted-beans-arabica-s18-cbu',
+    sku: 'RC-RBN-ARS18CBU',
+    gradeCode: 'AR-S18-CBU',
+    barcode: generateEan13Barcode(9104),
+    name_vi: 'CÀ PHÊ HẠT RANG ARABICA S18 CBU',
+    name_en: 'ROASTED COFFEE BEANS ARABICA S18 CBU',
+    subtitle_vi: 'Mã phẩm cấp AR-S18-CBU · Arabica chế biến ướt (CBU) sạch vị tiêu chuẩn cao',
+    subtitle_en: 'Grade AR-S18-CBU · Full-Washed Arabica Screen 18 Roasted Beans',
+    description_vi:
+      'Phiên bản Arabica S18 chế biến ướt hoàn toàn (CBU — Full Washed) lên men có kiểm soát trong bể sạch 18–24 giờ và rửa nước suối cao nguyên. Khi lên trống rang vừa-sáng, hạt cho tách cà phê cực kỳ trong trẻo, hậu vị sáng bừng nốt chanh vàng, quả mọng đỏ và mật ong thanh, đạt chuẩn khắt khe cho quầy Barista chuyên nghiệp và khách sạn 5 sao.',
+    description_en:
+      'Full-Washed (CBU) Screen 18 highland Arabica subjected to 18–24 hour controlled clean-tank fermentation. Medium-Light precision roasting highlights crystal clarity, bright lemon-verbena acidity, red berry notes, and crisp honeyed sweetness suited for specialty cafés and 5-star hospitality.',
+    coffee_type: '100% Arabica S18 CBU (Chế biến ướt)',
+    blend_summary_vi: '100% Arabica S18 chế biến ướt (CBU Washed) lên men kiểm soát',
+    blend_summary_en: '100% Full-Washed CBU Arabica S18 · High-clarity lot',
+    roast_profile_vi: 'Rang Sáng-Vừa (Light-Medium · Agtron ~62)',
+    roast_profile_en: 'Light-Medium Roast (Agtron ~62)',
+    tasting_notes_vi: 'Trà xanh hoa trắng · Chanh vàng · Mật ong · Vị sạch trong trẻo',
+    tasting_notes_en: 'White tea floral · Meyer lemon · Wild honey · Crisp clarity',
+    brewing_methods: ['Pour-over', 'Espresso', 'Cold Brew', 'French Press'],
+    tierPricesVnd: [390000, 365000, 345000, 325000, 305000],
+    inventory: 720,
+    screen_size: 'S18 (7.1mm+)',
+    processing_method: 'CBU (Full Washed)',
+    origin_region: 'Cầu Đất – Lạc Dương (Lâm Đồng)',
+    harvest_year: 'Vụ mùa mới nhất (Rang tươi theo tuần)',
+    grading_spec: 'AR-S18-CBU · Chế biến ướt sạch tiêu chuẩn HORECA & Specialty',
+    featured: 1,
+  },
+  {
+    slug: 'roasted-beans-robusta-s18-cbu',
+    sku: 'RC-RBN-ROS18CBU',
+    gradeCode: 'RO-S18-CBU',
+    barcode: generateEan13Barcode(9105),
+    name_vi: 'CÀ PHÊ HẠT RANG ROBUSTA S18 CBU',
+    name_en: 'ROASTED COFFEE BEANS ROBUSTA S18 CBU',
+    subtitle_vi: 'Mã phẩm cấp RO-S18-CBU · Fine Robusta chế biến ướt sạch vị, ngọt hậu cho Espresso',
+    subtitle_en: 'Grade RO-S18-CBU · Washed Fine Robusta S18 Roasted Beans',
+    description_vi:
+      'Dòng Fine Robusta sàng 18 chế biến ướt (CBU) loại bỏ hoàn toàn vị chát gắt và tạp mùi đất thường gặp ở Robusta phơi khô truyền thống. Nhờ quá trình tách vỏ thịt tươi và lên men kiểm soát, Robusta S18 CBU sau rang giữ được độ sánh dày ấn tượng, lớp crema mịn như nhung cùng vị sô-cô-la sữa và hạnh nhân mượt mà — lựa chọn hàng đầu cho quán Espresso hiện đại.',
+    description_en:
+      'Wet-processed (CBU) Fine Robusta Screen 18 crafted to eliminate harsh earthiness while maximizing sweetness and crema density. Fresh cherry pulping and controlled fermentation produce clean chocolate-almond smoothness with luxurious espresso mouthfeel—a favorite among modern espresso chains.',
+    coffee_type: '100% Fine Robusta S18 CBU (Chế biến ướt)',
+    blend_summary_vi: '100% Robusta sàng 18 chế biến ướt (CBU Washed) sạch vị cao cấp',
+    blend_summary_en: '100% CBU Washed Fine Robusta S18 · Clean cup profile',
+    roast_profile_vi: 'Rang Vừa (Medium Roast · Agtron ~52)',
+    roast_profile_en: 'Medium Roast (Agtron ~52)',
+    tasting_notes_vi: 'Sô-cô-la sữa · Hạnh nhân bùi · Mật mía · Crema mịn dày không gắt',
+    tasting_notes_en: 'Milk chocolate · Toasted almond · Cane sugar · Smooth silky crema',
+    brewing_methods: ['Espresso', 'Vietnamese Phin', 'Moka Pot', 'Iced Milk Coffee'],
+    tierPricesVnd: [265000, 248000, 232000, 218000, 202000],
+    inventory: 1500,
+    screen_size: 'S18 (7.1mm)',
+    processing_method: 'CBU (Full Washed Fine Robusta)',
+    origin_region: 'Đắk Lắk & Lâm Đồng',
+    harvest_year: 'Vụ mùa mới nhất (Rang tươi theo tuần)',
+    grading_spec: 'RO-S18-CBU · Fine Robusta chế biến ướt chuẩn pha máy',
+    featured: 1,
+  },
+  {
+    slug: 'roasted-beans-robusta-s18-honey',
+    sku: 'RC-RBN-ROS18HON',
+    gradeCode: 'RO-S18-HONEY',
+    barcode: generateEan13Barcode(9106),
+    name_vi: 'CÀ PHÊ HẠT RANG ROBUSTA S18 HONEY',
+    name_en: 'ROASTED COFFEE BEANS ROBUSTA S18 HONEY',
+    subtitle_vi: 'Mã phẩm cấp RO-S18-HONEY · Robusta S18 chế biến mật ong ngọt đậm hương trái chín',
+    subtitle_en: 'Grade RO-S18-HONEY · Honey-Processed Robusta S18 Roasted Beans',
+    description_vi:
+      'Quả cà phê Robusta chín đỏ 100% vùng Krông Năng – Đắk Lắk được xát vỏ giữ nguyên lớp nhầy mật ong (mucilage) và phơi giàn lưới nâng cao trong 16–20 ngày. Đường tự nhiên thẩm thấu sâu vào nhân giúp hạt Robusta S18 Honey sau rang tỏa hương mít chín nhẹ, caramel mật ong và sô-cô-la ngọt hậu — cân bằng hoàn hảo cho cả Phin đá lẫn Espresso.',
+    description_en:
+      '100% red-ripe Robusta cherries from Krông Năng – Đắk Lắk pulped with mucilage intact and slow-dried on raised beds for 16–20 days. Natural fruit sugars infuse the bean before roasting, yielding honeyed caramel richness, subtle ripe jackfruit sweetness, and rounded chocolate depth across Phin and Espresso.',
+    coffee_type: '100% Robusta S18 Honey Process',
+    blend_summary_vi: '100% Robusta sàng 18 chế biến Honey (Giữ lớp nhầy mật ong tự nhiên)',
+    blend_summary_en: '100% Honey-Processed Robusta S18 · Raised-bed dried',
+    roast_profile_vi: 'Rang Vừa-Đậm (Medium-Dark Honey Profile · Agtron ~50)',
+    roast_profile_en: 'Medium-Dark Honey Roast (Agtron ~50)',
+    tasting_notes_vi: 'Mật ong hoa cà phê · Caramel bơ · Mít chín dịu · Hậu ngọt kéo dài',
+    tasting_notes_en: 'Coffee-blossom honey · Butterscotch · Subtle tropical fruit · Long sweet finish',
+    brewing_methods: ['Espresso', 'Vietnamese Phin', 'Cold Brew', 'Iced Milk Coffee'],
+    tierPricesVnd: [285000, 268000, 252000, 236000, 220000],
+    inventory: 1350,
+    screen_size: 'S18 (7.1mm)',
+    processing_method: 'Honey Process (Phơi giàn nâng cao)',
+    origin_region: 'Krông Năng – Đắk Lắk',
+    harvest_year: 'Vụ mùa mới nhất (Rang tươi theo tuần)',
+    grading_spec: 'RO-S18-HONEY · Chế biến mật ong 100% quả chín đỏ',
+    featured: 1,
+  },
+];

@@ -111,6 +111,11 @@ export const Footer: React.FC = () => {
               </Link>
             </li>
             <li>
+              <Link to={localePath('/coffee/roasted-beans')} className="hover:text-white font-medium text-[#C6A667]">
+                {t('Cà phê Hạt rang (Giá theo kg)', 'Roasted Coffee Beans')}
+              </Link>
+            </li>
+            <li>
               <Link to={localePath('/coffee/green-beans')} className="hover:text-white">
                 {t('Cà phê nhân xanh', 'Green Coffee Beans')}
               </Link>

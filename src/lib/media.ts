@@ -187,6 +187,14 @@ export function getDefaultAdditionalGallerySlides(product: {
     ];
   }
 
+  if (product.category === 'roasted_beans') {
+    return [
+      { imageKey: 'origin_central_highlands', captionVi: 'Nguồn hạt sàng S18 tuyển chọn vùng nguyên liệu Tây Nguyên', captionEn: 'Selected Screen 18 highland-grown Vietnamese lots' },
+      { imageKey: 'hero_highland_harvest_banner', captionVi: 'Thu hái chín chọn lọc & phơi giàn tiêu chuẩn cao', captionEn: 'Ripe harvest & raised-bed preparation' },
+      { imageKey: 'product_brewing_ritual', captionVi: 'Tối ưu pha máy Espresso, Phin và rang xay sỉ HORECA', captionEn: 'Ideal for commercial Espresso, Phin & HORECA' },
+    ];
+  }
+
   if (product.category === 'green_bean') {
     return [
       { imageKey: 'hero_highland_harvest_banner', captionVi: 'Thu hái chín và phơi giàn chế biến Natural / Honey / CBU', captionEn: 'Ripe cherry picking & drying beds' },

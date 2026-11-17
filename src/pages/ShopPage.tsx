@@ -5,10 +5,11 @@ import { MediaImage } from '../components/MediaImage';
 import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
 import { localizeCoffeeType } from '../lib/i18nHelpers';
+import { getTierPriceRange, resolveVolumeTier } from '../lib/pricing';
 import { fetchProductsWithFallback } from '../lib/staticFallback';
 
 interface ShopPageProps {
-  defaultCategory?: 'all' | 'roasted' | 'instant' | 'green_bean';
+  defaultCategory?: 'all' | 'roasted' | 'roasted_beans' | 'instant' | 'green_bean';
 }
 
 export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) => {
@@ -19,6 +20,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) =
   const [category, setCategory] = useState<string>(defaultCategory);
   const [search, setSearch] = useState<string>(searchParams.get('q') || '');
   const [mascotFilter, setMascotFilter] = useState<string>('');
+  const [kgByProduct, setKgByProduct] = useState<Record<number, number>>({});
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,6 +55,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) =
           <h1 className="text-3xl sm:text-4xl font-bold text-[#202020] dark:text-[#F1EFEA]">
             {category === 'roasted'
               ? t('Cà Phê Rang Xay', 'Roasted Coffee Collections')
+              : category === 'roasted_beans'
+              ? t('Cà Phê Hạt Rang (Giá Theo Kg)', 'Roasted Coffee Beans (Volume Tiers)')
               : category === 'instant'
               ? t('Cà Phê Hòa Tan Silver & Gold', 'Instant Coffee — Silver & Gold')
               : t('Tất Cả Sản Phẩm Cà Phê', 'All Coffee Products')}
@@ -92,6 +96,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) =
           {[
             { id: 'all', vi: 'Tất cả', en: 'All' },
             { id: 'roasted', vi: 'Cà phê Rang Xay', en: 'Roasted Coffee' },
+            { id: 'roasted_beans', vi: 'Cà phê Hạt Rang (kg)', en: 'Roasted Beans (kg)' },
             { id: 'instant', vi: 'Cà phê Hòa Tan', en: 'Instant Coffee' },
             { id: 'green_bean', vi: 'Nhân Xanh (B2B)', en: 'Green Beans (B2B)' },
           ].map((tab) => (
@@ -189,8 +194,10 @@ export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) =
                   </div>
 
                   <div className="p-5 space-y-2">
-                    <div className="flex items-center gap-2 text-[11px] text-[#202020]/60 dark:text-[#F1EFEA]/60 font-mono">
-                      <span className="text-[#00552B] dark:text-[#C6A667] font-semibold">{p.sku}</span>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[#202020]/60 dark:text-[#F1EFEA]/60 font-mono">
+                      <span className="text-[#00552B] dark:text-[#C6A667] font-semibold">
+                        {p.category === 'roasted_beans' && p.sub_category ? p.sub_category : p.sku}
+                      </span>
                       <span>·</span>
                       <span>{localizeCoffeeType(p.coffee_type, lang)}</span>
                       {p.status === 'configurable_on_request' && (
@@ -209,53 +216,151 @@ export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) =
                     <p className="text-xs text-[#202020]/70 dark:text-[#F1EFEA]/70 line-clamp-2">
                       {lang === 'vi' ? p.subtitle_vi : p.subtitle_en}
                     </p>
-                  </div>
-                </div>
-
-                <div className="px-5 pb-5 pt-3 border-t border-[#202020]/8 dark:border-white/10 flex items-center justify-between gap-2">
-                  <div>
-                    <span className="text-base font-bold text-[#202020] dark:text-[#F1EFEA] tabular-nums block">
-                      {formatPrice(p.price_vnd, p.price_usd)}
-                    </span>
-                    {p.is_demo_data === 1 && (
-                      <span className="text-[10px] text-[#202020]/50 dark:text-[#F1EFEA]/50">
-                        {t('Giá tham khảo phát triển', 'Reference Demo Price')}
-                      </span>
+                    {p.barcode && (
+                      <p className="text-[10px] font-mono text-[#202020]/45 dark:text-[#F1EFEA]/45">
+                        EAN-13: {p.barcode}
+                      </p>
                     )}
                   </div>
-
-                  {p.category === 'green_bean' ? (
-                    <Link
-                      to={localePath(`/product/${p.slug}`)}
-                      className="px-3.5 py-2 bg-[#003D25] text-[#C6A667] text-xs font-semibold rounded hover:bg-[#00552B]"
-                    >
-                      {t('Thông số & Báo giá', 'Spec & Quote')}
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const firstVar = p.variants[0];
-                        addToCart({
-                          productId: p.id,
-                          slug: p.slug,
-                          sku: p.sku,
-                          nameVi: p.name_vi,
-                          nameEn: p.name_en,
-                          variantLabel: firstVar ? firstVar.label : 'Standard',
-                          unitPriceVnd: firstVar ? firstVar.priceVnd : p.price_vnd,
-                          unitPriceUsd: firstVar ? firstVar.priceUsd : p.price_usd,
-                          quantity: 1,
-                          imageKey: p.image_key,
-                        });
-                        showToast(t('Đã thêm vào giỏ hàng', 'Added to cart'));
-                      }}
-                      className="px-3.5 py-2 bg-[#00552B] text-white text-xs font-medium rounded hover:bg-[#003D25] cursor-pointer"
-                    >
-                      {t('Thêm vào giỏ', 'Add to Cart')}
-                    </button>
-                  )}
                 </div>
+
+                {p.category === 'roasted_beans' && p.pricing_tiers && p.pricing_tiers.length > 0 ? (
+                  (() => {
+                    const selectedKg = Math.max(1, kgByProduct[p.id] ?? 1);
+                    const activeTier = resolveVolumeTier(p.pricing_tiers, selectedKg);
+                    const range = getTierPriceRange(p.pricing_tiers);
+                    const unitVnd = activeTier ? activeTier.priceVnd : p.price_vnd;
+                    const unitUsd = activeTier ? activeTier.priceUsd : p.price_usd;
+                    return (
+                      <div className="px-5 pb-5 pt-3 border-t border-[#202020]/8 dark:border-white/10 space-y-3">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <div>
+                            <span className="text-base font-bold text-[#00552B] dark:text-[#C6A667] tabular-nums">
+                              {formatPrice(unitVnd, unitUsd)}
+                              <span className="text-xs font-normal opacity-75">/kg</span>
+                            </span>
+                            {range && (
+                              <span className="text-[10px] text-[#202020]/55 dark:text-[#F1EFEA]/55 block tabular-nums">
+                                {t(
+                                  `5 mức giá: ${formatPrice(range.minVnd, range.minUsd)} – ${formatPrice(range.maxVnd, range.maxUsd)}/kg`,
+                                  `5 tiers: ${formatPrice(range.minVnd, range.minUsd)} – ${formatPrice(range.maxVnd, range.maxUsd)}/kg`
+                                )}
+                              </span>
+                            )}
+                          </div>
+                          {activeTier && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#00552B]/10 dark:bg-[#C6A667]/20 text-[#00552B] dark:text-[#C6A667] font-semibold">
+                              {lang === 'vi' ? activeTier.labelVi : activeTier.labelEn}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center border border-[#202020]/15 dark:border-white/15 rounded bg-[#F8F5EF] dark:bg-[#0E1512]">
+                            <input
+                              type="number"
+                              min={1}
+                              max={50000}
+                              value={selectedKg}
+                              onChange={(e) =>
+                                setKgByProduct((prev) => ({
+                                  ...prev,
+                                  [p.id]: Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                                }))
+                              }
+                              aria-label={t('Số lượng (kg)', 'Quantity (kg)')}
+                              className="w-16 px-2 py-1.5 text-xs font-semibold text-center bg-transparent focus:outline-none tabular-nums"
+                            />
+                            <span className="pr-2 text-[11px] font-mono opacity-60">kg</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              addToCart({
+                                productId: p.id,
+                                slug: p.slug,
+                                sku: p.sku,
+                                nameVi: p.name_vi,
+                                nameEn: p.name_en,
+                                variantLabel: activeTier ? `${selectedKg} kg · ${activeTier.labelVi}` : `${selectedKg} kg`,
+                                unitPriceVnd: unitVnd,
+                                unitPriceUsd: unitUsd,
+                                quantity: selectedKg,
+                                imageKey: p.image_key,
+                                unit: 'kg',
+                                pricingTiers: p.pricing_tiers,
+                              });
+                              showToast(
+                                t(
+                                  `Đã thêm ${selectedKg} kg (${formatPrice(unitVnd * selectedKg, unitUsd * selectedKg)}) vào giỏ`,
+                                  `Added ${selectedKg} kg to cart`
+                                )
+                              );
+                            }}
+                            className="flex-1 px-3 py-2 bg-[#00552B] text-white text-xs font-semibold rounded hover:bg-[#003D25] cursor-pointer text-center"
+                          >
+                            {t(
+                              `Thêm · ${formatPrice(unitVnd * selectedKg, unitUsd * selectedKg)}`,
+                              `Add · ${formatPrice(unitVnd * selectedKg, unitUsd * selectedKg)}`
+                            )}
+                          </button>
+                        </div>
+
+                        <Link
+                          to={localePath(`/product/${p.slug}`)}
+                          className="block text-center text-[11px] font-medium text-[#00552B] dark:text-[#C6A667] hover:underline"
+                        >
+                          {t('Xem bảng giá 5 mức chi tiết →', 'View full 5-tier price table →')}
+                        </Link>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="px-5 pb-5 pt-3 border-t border-[#202020]/8 dark:border-white/10 flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-base font-bold text-[#202020] dark:text-[#F1EFEA] tabular-nums block">
+                        {formatPrice(p.price_vnd, p.price_usd)}
+                      </span>
+                      {p.is_demo_data === 1 && (
+                        <span className="text-[10px] text-[#202020]/50 dark:text-[#F1EFEA]/50">
+                          {t('Giá tham khảo phát triển', 'Reference Demo Price')}
+                        </span>
+                      )}
+                    </div>
+
+                    {p.category === 'green_bean' ? (
+                      <Link
+                        to={localePath(`/product/${p.slug}`)}
+                        className="px-3.5 py-2 bg-[#003D25] text-[#C6A667] text-xs font-semibold rounded hover:bg-[#00552B]"
+                      >
+                        {t('Thông số & Báo giá', 'Spec & Quote')}
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const firstVar = p.variants[0];
+                          addToCart({
+                            productId: p.id,
+                            slug: p.slug,
+                            sku: p.sku,
+                            nameVi: p.name_vi,
+                            nameEn: p.name_en,
+                            variantLabel: firstVar ? firstVar.label : 'Standard',
+                            unitPriceVnd: firstVar ? firstVar.priceVnd : p.price_vnd,
+                            unitPriceUsd: firstVar ? firstVar.priceUsd : p.price_usd,
+                            quantity: 1,
+                            imageKey: p.image_key,
+                          });
+                          showToast(t('Đã thêm vào giỏ hàng', 'Added to cart'));
+                        }}
+                        className="px-3.5 py-2 bg-[#00552B] text-white text-xs font-medium rounded hover:bg-[#003D25] cursor-pointer"
+                      >
+                        {t('Thêm vào giỏ', 'Add to Cart')}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

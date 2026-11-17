@@ -129,6 +129,7 @@ function renderPublicRoutes() {
     <Route index element={<HomePage />} />
     <Route path="shop" element={<ShopPage />} />
     <Route path="coffee/roasted" element={<ShopPage defaultCategory="roasted" />} />
+    <Route path="coffee/roasted-beans" element={<ShopPage defaultCategory="roasted_beans" />} />
     <Route path="coffee/instant" element={<ShopPage defaultCategory="instant" />} />
     <Route path="coffee/green-beans" element={<GreenCoffeePage />} />
     <Route path="product/:slug" element={<ProductDetailPage />} />

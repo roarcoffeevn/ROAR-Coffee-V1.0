@@ -52,10 +52,12 @@ function safeParseJson<T>(raw: string | undefined | null, fallback: T): T {
 function mapProductRow(p: any): Product {
   return {
     ...p,
+    barcode: p.barcode || '',
     blend_summary_vi: p.blend_public ? p.blend_summary_vi : 'Tỷ lệ phối trộn bảo mật nội bộ',
     blend_summary_en: p.blend_public ? p.blend_summary_en : 'Confidential proprietary blend ratio',
     brewing_methods: Array.isArray(p.brewing_methods) ? p.brewing_methods : safeParseJson(p.brewing_methods_json, []),
     variants: Array.isArray(p.variants) ? p.variants : safeParseJson(p.variants_json, []),
+    pricing_tiers: Array.isArray(p.pricing_tiers) ? p.pricing_tiers : safeParseJson(p.pricing_tiers_json, []),
     packaging_options: Array.isArray(p.packaging_options) ? p.packaging_options : safeParseJson(p.packaging_options_json, []),
     gallery_images: Array.isArray(p.gallery_images) ? p.gallery_images : safeParseJson(p.gallery_images_json, []),
   };
@@ -137,6 +139,9 @@ export async function fetchProductsWithFallback(queryParams?: URLSearchParams): 
         String(p.name_vi || '').toLowerCase().includes(search) ||
         String(p.name_en || '').toLowerCase().includes(search) ||
         String(p.sku || '').toLowerCase().includes(search) ||
+        String(p.barcode || '').toLowerCase().includes(search) ||
+        String(p.sub_category || '').toLowerCase().includes(search) ||
+        String(p.grading_spec || '').toLowerCase().includes(search) ||
         String(p.coffee_type || '').toLowerCase().includes(search) ||
         String(p.origin_region || '').toLowerCase().includes(search)
       );

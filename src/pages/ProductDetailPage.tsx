@@ -7,6 +7,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
 import { getProductGallery } from '../lib/media';
 import { localizeBrewingMethod, localizeCoffeeType, localizeVariantLabel } from '../lib/i18nHelpers';
+import { resolveVolumeTier } from '../lib/pricing';
 import { fetchProductBySlugWithFallback } from '../lib/staticFallback';
 
 export const ProductDetailPage: React.FC = () => {
@@ -69,9 +70,11 @@ export const ProductDetailPage: React.FC = () => {
     const catNode =
       product.category === 'green_bean'
         ? { labelVi: 'Cà phê Nhân xanh B2B', labelEn: 'Green Coffee Matrix', to: '/coffee/green-beans' }
-        : product.category === 'instant'
-          ? { labelVi: 'Cà phê Hòa tan', labelEn: 'Instant Coffee', to: '/coffee/instant' }
-          : { labelVi: 'Cà phê Rang xay', labelEn: 'Roasted Coffee', to: '/coffee/roasted' };
+        : product.category === 'roasted_beans'
+          ? { labelVi: 'Cà phê Hạt rang (kg)', labelEn: 'Roasted Coffee Beans', to: '/coffee/roasted-beans' }
+          : product.category === 'instant'
+            ? { labelVi: 'Cà phê Hòa tan', labelEn: 'Instant Coffee', to: '/coffee/instant' }
+            : { labelVi: 'Cà phê Rang xay', labelEn: 'Roasted Coffee', to: '/coffee/roasted' };
     setCustomBreadcrumb([
       { labelVi: 'Cửa hàng', labelEn: 'Shop', to: '/shop' },
       catNode,
@@ -95,11 +98,18 @@ export const ProductDetailPage: React.FC = () => {
     );
   }
 
+  const hasVolumeTiers =
+    product.category === 'roasted_beans' ||
+    (Array.isArray(product.pricing_tiers) && product.pricing_tiers.length > 0);
+  const activeTier = hasVolumeTiers ? resolveVolumeTier(product.pricing_tiers, quantity) : null;
+
   const activeVariant = product.variants[selectedVariantIdx] || {
     label: 'Standard',
     priceVnd: product.price_vnd,
     priceUsd: product.price_usd,
   };
+  const effectiveUnitVnd = activeTier ? activeTier.priceVnd : activeVariant.priceVnd;
+  const effectiveUnitUsd = activeTier ? activeTier.priceUsd : activeVariant.priceUsd;
   const wished = wishlist.includes(product.slug);
   const isGreen = product.category === 'green_bean';
 
@@ -110,11 +120,15 @@ export const ProductDetailPage: React.FC = () => {
       sku: product.sku,
       nameVi: product.name_vi,
       nameEn: product.name_en,
-      variantLabel: activeVariant.label,
-      unitPriceVnd: activeVariant.priceVnd,
-      unitPriceUsd: activeVariant.priceUsd,
+      variantLabel: hasVolumeTiers
+        ? `${quantity} kg · ${activeTier ? activeTier.labelVi : '1 kg'}`
+        : activeVariant.label,
+      unitPriceVnd: effectiveUnitVnd,
+      unitPriceUsd: effectiveUnitUsd,
       quantity,
       imageKey: product.image_key,
+      unit: hasVolumeTiers ? 'kg' : 'unit',
+      pricingTiers: hasVolumeTiers ? product.pricing_tiers : undefined,
     });
     showToast(t('Đã thêm sản phẩm vào giỏ hàng', 'Added to shopping bag'));
     if (goCheckout) navigate(localePath('/checkout'));
@@ -140,11 +154,23 @@ export const ProductDetailPage: React.FC = () => {
   return (
     <div className="max-w-[1280px] mx-auto px-6 py-10 space-y-14">
       <Link
-        to={localePath(isGreen ? '/coffee/green-beans' : '/shop')}
+        to={localePath(
+          isGreen
+            ? '/coffee/green-beans'
+            : product.category === 'roasted_beans'
+              ? '/coffee/roasted-beans'
+              : '/shop'
+        )}
         className="inline-flex items-center gap-1.5 text-xs font-medium text-[#202020]/70 dark:text-[#F1EFEA]/70 hover:text-[#00552B] dark:hover:text-[#C6A667]"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
-        <span>{isGreen ? t('Quay lại Ma trận Nhân xanh', 'Back to Green Coffee Matrix') : t('Quay lại danh mục', 'Back to Shop')}</span>
+        <span>
+          {isGreen
+            ? t('Quay lại Ma trận Nhân xanh', 'Back to Green Coffee Matrix')
+            : product.category === 'roasted_beans'
+              ? t('Quay lại Cà phê Hạt rang', 'Back to Roasted Coffee Beans')
+              : t('Quay lại danh mục', 'Back to Shop')}
+        </span>
       </Link>
 
       {/* Main Contiguous Purchase / Spec Module with Multi-Image Gallery */}
@@ -276,8 +302,14 @@ export const ProductDetailPage: React.FC = () => {
 
         <div className="lg:col-span-6 bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 sm:p-8 space-y-6">
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2 text-xs text-[#00552B] dark:text-[#C6A667] font-mono">
-              <span>{t('Mã SP:', 'SKU:')} {product.sku} · {localizeCoffeeType(product.coffee_type, lang)}</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#00552B] dark:text-[#C6A667] font-mono">
+              <span>
+                {t('Mã SP:', 'SKU:')} {product.sku}
+                {product.sub_category && hasVolumeTiers ? ` (${product.sub_category})` : ''}
+                {product.barcode ? ` · Barcode: ${product.barcode}` : ''}
+                {' · '}
+                {localizeCoffeeType(product.coffee_type, lang)}
+              </span>
               <button
                 type="button"
                 onClick={() => toggleWishlist(product.slug)}
@@ -295,13 +327,21 @@ export const ProductDetailPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-baseline justify-between border-y border-[#202020]/10 dark:border-white/10 py-4">
-            <span className="text-2xl font-bold text-[#202020] dark:text-[#F1EFEA] tabular-nums">
-              {formatPrice(activeVariant.priceVnd, activeVariant.priceUsd)}
-            </span>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 border-y border-[#202020]/10 dark:border-white/10 py-4">
+            <div>
+              <span className="text-2xl font-bold text-[#202020] dark:text-[#F1EFEA] tabular-nums">
+                {formatPrice(effectiveUnitVnd, effectiveUnitUsd)}
+                {hasVolumeTiers && <span className="text-sm font-medium opacity-75"> / kg</span>}
+              </span>
+              {activeTier && (
+                <span className="block text-xs font-semibold text-[#00552B] dark:text-[#C6A667] mt-0.5">
+                  {t('Mức áp dụng:', 'Active Tier:')} {lang === 'vi' ? activeTier.labelVi : activeTier.labelEn}
+                </span>
+              )}
+            </div>
             <span className="text-xs text-[#202020]/65 dark:text-[#F1EFEA]/65 tabular-nums">
               {product.inventory > 0
-                ? t(`Tồn kho tham chiếu: ${product.inventory}`, `Ref. Stock: ${product.inventory}`)
+                ? t(`Tồn kho tham chiếu: ${product.inventory}${hasVolumeTiers ? ' kg' : ''}`, `Ref. Stock: ${product.inventory}${hasVolumeTiers ? ' kg' : ''}`)
                 : t('Cấu hình theo đơn đặt hàng', 'Configurable on Request')}
             </span>
           </div>
@@ -310,32 +350,87 @@ export const ProductDetailPage: React.FC = () => {
             {lang === 'vi' ? product.description_vi : product.description_en}
           </p>
 
-          {/* Variants */}
-          {product.variants.length > 0 && (
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-[#202020]/70 dark:text-[#F1EFEA]/70 block">
-                {t('Quy cách & Biến thể', 'Select Packaging / Variant')}
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {product.variants.map((v, idx) => (
-                  <button
-                    key={v.label}
-                    type="button"
-                    onClick={() => setSelectedVariantIdx(idx)}
-                    className={`px-3.5 py-2.5 rounded-lg border text-left text-xs transition-colors cursor-pointer ${
-                      idx === selectedVariantIdx
-                        ? 'border-[#00552B] dark:border-[#C6A667] bg-[#00552B]/6 dark:bg-[#00552B]/30 text-[#003D25] dark:text-[#C6A667] font-semibold'
-                        : 'border-[#202020]/15 dark:border-white/15 text-[#202020]/80 dark:text-[#F1EFEA]/80 hover:border-[#00552B]/40'
-                    }`}
-                  >
-                    <span className="block">{localizeVariantLabel(v.label, lang)}</span>
-                    <span className="font-mono text-[11px] opacity-80 tabular-nums">
-                      {formatPrice(v.priceVnd, v.priceUsd)}
-                    </span>
-                  </button>
-                ))}
+          {/* 5-Tier Kg Volume Pricing Table OR Standard Variants */}
+          {hasVolumeTiers && product.pricing_tiers ? (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#202020]/70 dark:text-[#F1EFEA]/70">
+                  {t('Bảng Giá 5 Mức Theo Số Lượng (kg)', '5-Tier Volume Pricing (per kg)')}
+                </label>
+                <span className="text-[11px] text-[#00552B] dark:text-[#C6A667]">
+                  {t('Nhấp để chọn nhanh mức kg', 'Click any tier to apply')}
+                </span>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-[#202020]/12 dark:border-white/15">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#F8F5EF] dark:bg-[#0E1512] text-[#202020]/70 dark:text-[#F1EFEA]/70 uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="py-2.5 px-3 font-semibold">{t('Mức số lượng', 'Quantity Tier')}</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">{t('Đơn giá / kg', 'Price / kg')}</th>
+                      <th className="py-2.5 px-3 font-semibold text-right">{t('Trạng thái', 'Status')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#202020]/8 dark:divide-white/10">
+                    {product.pricing_tiers.map((tier) => {
+                      const isCurrent = activeTier?.minKg === tier.minKg;
+                      return (
+                        <tr
+                          key={tier.minKg}
+                          onClick={() => setQuantity(tier.minKg)}
+                          className={`cursor-pointer transition-colors ${
+                            isCurrent
+                              ? 'bg-[#00552B]/10 dark:bg-[#00552B]/35 text-[#003D25] dark:text-[#C6A667] font-semibold'
+                              : 'hover:bg-[#F8F5EF]/70 dark:hover:bg-white/5 text-[#202020]/85 dark:text-[#F1EFEA]/85'
+                          }`}
+                        >
+                          <td className="py-2.5 px-3 font-mono">{lang === 'vi' ? tier.labelVi : tier.labelEn}</td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold">
+                            {formatPrice(tier.priceVnd, tier.priceUsd)}/kg
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            {isCurrent ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#00552B] text-white text-[10px] font-semibold">
+                                <Check className="w-3 h-3" /> {t('Đang áp dụng', 'Active')}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] opacity-60">{t('Chọn mức này', 'Select')}</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
+          ) : (
+            product.variants.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#202020]/70 dark:text-[#F1EFEA]/70 block">
+                  {t('Quy cách & Biến thể', 'Select Packaging / Variant')}
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {product.variants.map((v, idx) => (
+                    <button
+                      key={v.label}
+                      type="button"
+                      onClick={() => setSelectedVariantIdx(idx)}
+                      className={`px-3.5 py-2.5 rounded-lg border text-left text-xs transition-colors cursor-pointer ${
+                        idx === selectedVariantIdx
+                          ? 'border-[#00552B] dark:border-[#C6A667] bg-[#00552B]/6 dark:bg-[#00552B]/30 text-[#003D25] dark:text-[#C6A667] font-semibold'
+                          : 'border-[#202020]/15 dark:border-white/15 text-[#202020]/80 dark:text-[#F1EFEA]/80 hover:border-[#00552B]/40'
+                      }`}
+                    >
+                      <span className="block">{localizeVariantLabel(v.label, lang)}</span>
+                      <span className="font-mono text-[11px] opacity-80 tabular-nums">
+                        {formatPrice(v.priceVnd, v.priceUsd)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
           )}
 
           {/* Purchase / B2B Actions */}
@@ -373,8 +468,53 @@ export const ProductDetailPage: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-3 pt-2">
+              {hasVolumeTiers && (
+                <div className="p-4 rounded-xl bg-[#F8F5EF] dark:bg-[#0E1512] border border-[#00552B]/15 dark:border-white/10 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="font-semibold text-[#202020] dark:text-[#F1EFEA]">
+                      {t('Chọn nhanh số lượng kg:', 'Quick select kg:')}
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[1, 5, 20, 50, 100].map((presetKg) => (
+                        <button
+                          key={presetKg}
+                          type="button"
+                          onClick={() => setQuantity(presetKg)}
+                          className={`px-2.5 py-1 rounded text-[11px] font-mono font-semibold border cursor-pointer transition-colors ${
+                            quantity === presetKg
+                              ? 'bg-[#00552B] text-white border-[#00552B]'
+                              : 'bg-white dark:bg-[#16221C] border-[#202020]/15 dark:border-white/15 hover:border-[#00552B]'
+                          }`}
+                        >
+                          {presetKg} kg
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#202020]/10 dark:border-white/10 text-xs">
+                    <div>
+                      <span className="text-[#202020]/70 dark:text-[#F1EFEA]/70 block">
+                        {t('Đơn giá áp dụng', 'Applied Unit Price')} ({activeTier ? (lang === 'vi' ? activeTier.labelVi : activeTier.labelEn) : '1 kg'})
+                      </span>
+                      <span className="font-mono font-bold text-sm text-[#00552B] dark:text-[#C6A667] tabular-nums">
+                        {formatPrice(effectiveUnitVnd, effectiveUnitUsd)}/kg
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[#202020]/70 dark:text-[#F1EFEA]/70 block">
+                        {t(`Tổng giá trị (${quantity} kg)`, `Order Total (${quantity} kg)`)}
+                      </span>
+                      <span className="font-mono font-bold text-base text-[#202020] dark:text-[#F1EFEA] tabular-nums">
+                        {formatPrice(effectiveUnitVnd * quantity, effectiveUnitUsd * quantity)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
-                <div className="flex items-center border border-[#202020]/15 dark:border-white/15 rounded">
+                <div className="flex items-center border border-[#202020]/15 dark:border-white/15 rounded bg-white dark:bg-[#0E1512]">
                   <button
                     type="button"
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
@@ -382,7 +522,16 @@ export const ProductDetailPage: React.FC = () => {
                   >
                     −
                   </button>
-                  <span className="w-10 text-center text-sm font-semibold tabular-nums">{quantity}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100000}
+                    value={quantity}
+                    onChange={(e) => setQuantity(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+                    aria-label={t('Số lượng', 'Quantity')}
+                    className="w-16 h-10 text-center text-sm font-semibold bg-transparent focus:outline-none tabular-nums"
+                  />
+                  {hasVolumeTiers && <span className="pr-2.5 text-xs font-mono opacity-60">kg</span>}
                   <button
                     type="button"
                     onClick={() => setQuantity((q) => q + 1)}
@@ -397,7 +546,9 @@ export const ProductDetailPage: React.FC = () => {
                   onClick={() => handleAdd(false)}
                   className="flex-1 py-3 bg-[#00552B] text-white text-sm font-semibold rounded hover:bg-[#003D25] transition-colors cursor-pointer"
                 >
-                  {t('Thêm vào giỏ hàng', 'Add to Cart')}
+                  {hasVolumeTiers
+                    ? t(`Thêm ${quantity} kg vào giỏ`, `Add ${quantity} kg to Cart`)
+                    : t('Thêm vào giỏ hàng', 'Add to Cart')}
                 </button>
               </div>
 
@@ -425,6 +576,12 @@ export const ProductDetailPage: React.FC = () => {
 
           {/* Technical / Spec Details */}
           <div className="pt-4 border-t border-[#202020]/10 dark:border-white/10 space-y-2.5 text-xs">
+            {product.barcode && (
+              <div className="flex justify-between gap-4">
+                <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Mã vạch (Barcode EAN-13)', 'Barcode (EAN-13)')}</span>
+                <span className="font-mono font-semibold text-right text-[#00552B] dark:text-[#C6A667]">{product.barcode}</span>
+              </div>
+            )}
             <div className="flex justify-between gap-4">
               <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Thông tin phối trộn', 'Blend Information')}</span>
               <span className="font-medium text-right">{lang === 'vi' ? product.blend_summary_vi : product.blend_summary_en}</span>
@@ -441,20 +598,32 @@ export const ProductDetailPage: React.FC = () => {
               <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Phương pháp pha gợi ý', 'Recommended Brewing')}</span>
               <span className="font-medium text-right">{product.brewing_methods.map((m) => localizeBrewingMethod(m, lang)).join(' · ')}</span>
             </div>
-            {isGreen && (
+            {(isGreen || hasVolumeTiers) && (
               <>
-                <div className="flex justify-between gap-4">
-                  <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Vùng trồng', 'Origin Region')}</span>
-                  <span className="font-medium text-right">{product.origin_region}</span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Niên vụ', 'Harvest Year')}</span>
-                  <span className="font-medium text-right">{product.harvest_year}</span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Độ ẩm / Tỷ trọng / Lỗi', 'Moisture / Density / Defects')}</span>
-                  <span className="font-medium text-right">{product.moisture_content} · {product.density}</span>
-                </div>
+                {product.screen_size && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Kích thước sàng / Phẩm cấp', 'Screen Size / Grade')}</span>
+                    <span className="font-medium text-right">{product.screen_size}{product.sub_category ? ` · ${product.sub_category}` : ''}</span>
+                  </div>
+                )}
+                {product.origin_region && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Vùng trồng', 'Origin Region')}</span>
+                    <span className="font-medium text-right">{product.origin_region}</span>
+                  </div>
+                )}
+                {isGreen && (
+                  <>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Niên vụ', 'Harvest Year')}</span>
+                      <span className="font-medium text-right">{product.harvest_year}</span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Độ ẩm / Tỷ trọng / Lỗi', 'Moisture / Density / Defects')}</span>
+                      <span className="font-medium text-right">{product.moisture_content} · {product.density}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between gap-4">
                   <span className="text-[#202020]/60 dark:text-[#F1EFEA]/60">{t('Số lượng đặt tối thiểu (MOQ)', 'Minimum Order Quantity')}</span>
                   <span className="font-medium text-right">{product.moq}</span>

@@ -62,6 +62,7 @@ type CmsSection = AdminPermission;
 
 const CATEGORY_LABELS_VI: Record<string, string> = {
   roasted: 'Cà phê Rang xay',
+  roasted_beans: 'Cà phê Hạt rang (kg)',
   instant: 'Cà phê Hòa tan',
   green_bean: 'Nhân xanh B2B',
 };
@@ -127,7 +128,7 @@ export const AdminCmsPage: React.FC = () => {
   const [teamAuditLogs, setTeamAuditLogs] = useState<any[]>([]);
 
   // Products filters & modals
-  const [prodCatFilter, setProdCatFilter] = useState<'all' | 'roasted' | 'instant' | 'green_bean'>('all');
+  const [prodCatFilter, setProdCatFilter] = useState<'all' | 'roasted' | 'roasted_beans' | 'instant' | 'green_bean'>('all');
   const [prodSearch, setProdSearch] = useState('');
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
@@ -309,9 +310,12 @@ export const AdminCmsPage: React.FC = () => {
       if (prodCatFilter !== 'all' && p.category !== prodCatFilter) return false;
       if (q) {
         return (
-          p.name_vi.toLowerCase().includes(q) ||
-          p.name_en.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q)
+          (p.name_vi || '').toLowerCase().includes(q) ||
+          (p.name_en || '').toLowerCase().includes(q) ||
+          (p.sku || '').toLowerCase().includes(q) ||
+          (p.barcode || '').toLowerCase().includes(q) ||
+          (p.sub_category || '').toLowerCase().includes(q) ||
+          (p.grading_spec || '').toLowerCase().includes(q)
         );
       }
       return true;
@@ -320,15 +324,19 @@ export const AdminCmsPage: React.FC = () => {
 
   const filteredOrders = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, '').replace(/^84/, '0');
     return orders.filter((o) => {
       if (orderStatusFilter !== 'all' && o.order_status !== orderStatusFilter) return false;
       if (orderPaymentFilter !== 'all' && o.payment_status !== orderPaymentFilter) return false;
       if (q) {
+        const phoneDigits = String(o.customer_phone || '').replace(/\D/g, '').replace(/^84/, '0');
+        const hitPhone = qDigits.length >= 4 && phoneDigits.includes(qDigits);
         const hitOrder =
           (o.order_number || '').toLowerCase().includes(q) ||
           (o.customer_name || '').toLowerCase().includes(q) ||
           (o.customer_email || '').toLowerCase().includes(q) ||
           (o.customer_phone || '').toLowerCase().includes(q) ||
+          hitPhone ||
           (o.tracking_code || '').toLowerCase().includes(q);
         const hitItem = (o.items || []).some(
           (it: any) =>
@@ -1167,6 +1175,7 @@ export const AdminCmsPage: React.FC = () => {
                   {[
                     { id: 'all', label: `${t('Tất cả', 'All')} (${products.length})` },
                     { id: 'roasted', label: `${t('Rang xay', 'Roasted')} (${products.filter((p) => p.category === 'roasted').length})` },
+                    { id: 'roasted_beans', label: `${t('Hạt rang (kg)', 'Roasted Beans')} (${products.filter((p) => p.category === 'roasted_beans').length})` },
                     { id: 'instant', label: `${t('Hòa tan', 'Instant')} (${products.filter((p) => p.category === 'instant').length})` },
                     { id: 'green_bean', label: `${t('Nhân xanh', 'Green')} (${products.filter((p) => p.category === 'green_bean').length})` },
                   ].map((tb) => (
@@ -1190,7 +1199,7 @@ export const AdminCmsPage: React.FC = () => {
                       type="text"
                       value={prodSearch}
                       onChange={(e) => setProdSearch(e.target.value)}
-                      placeholder={t('Tìm tên sản phẩm hoặc SKU...', 'Search name or SKU...')}
+                      placeholder={t('Tìm tên SP, SKU, Barcode...', 'Search name, SKU, Barcode...')}
                       className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-full sm:w-56"
                     />
                   </div>
@@ -1256,8 +1265,14 @@ export const AdminCmsPage: React.FC = () => {
                           {lang === 'en' ? p.name_en : p.name_vi}
                         </button>
                         <p className="text-[11px] font-mono text-slate-500 truncate">
-                          {p.sku} · {CATEGORY_LABELS_VI[p.category] || p.category}
+                          {p.sku}
+                          {p.sub_category ? ` (${p.sub_category})` : ''} · {CATEGORY_LABELS_VI[p.category] || p.category}
                         </p>
+                        {p.barcode && (
+                          <p className="text-[10px] font-mono text-[#00552B] truncate">
+                            EAN-13: {p.barcode}
+                          </p>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -1349,8 +1364,15 @@ export const AdminCmsPage: React.FC = () => {
                                 {lang === 'en' ? p.name_en : p.name_vi}
                               </button>
                               <p className="text-[11px] font-mono text-slate-500">
-                                {p.sku} · {Array.isArray(p.variants) ? p.variants.length : 0} {t('biến thể', 'variants')} ·{' '}
-                                {Array.isArray(p.gallery_images) ? p.gallery_images.length : 0} {t('ảnh phụ', 'gallery imgs')}
+                                {p.sku}
+                                {p.sub_category ? ` (${p.sub_category})` : ''}
+                                {p.barcode ? ` · Barcode: ${p.barcode}` : ''}
+                              </p>
+                              <p className="text-[10px] text-slate-400">
+                                {Array.isArray(p.pricing_tiers) && p.pricing_tiers.length > 0
+                                  ? `${p.pricing_tiers.length} ${t('mức giá kg', 'kg tiers')}`
+                                  : `${Array.isArray(p.variants) ? p.variants.length : 0} ${t('biến thể', 'variants')}`}{' '}
+                                · {Array.isArray(p.gallery_images) ? p.gallery_images.length : 0} {t('ảnh phụ', 'gallery imgs')}
                               </p>
                             </div>
                           </div>
@@ -1369,6 +1391,18 @@ export const AdminCmsPage: React.FC = () => {
                             }}
                             className="w-28 text-right border border-slate-200 rounded-md px-2 py-1 font-mono tabular-nums"
                           />
+                          {Array.isArray(p.pricing_tiers) && p.pricing_tiers.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingProduct(p);
+                                setProductModalOpen(true);
+                              }}
+                              className="block ml-auto mt-1 text-[10px] font-semibold text-[#00552B] hover:underline cursor-pointer"
+                            >
+                              {t('Sửa 5 mức giá kg', 'Edit 5 kg tiers')} →
+                            </button>
+                          )}
                         </td>
                         <td className="p-3 text-right">
                           <input
@@ -1531,8 +1565,8 @@ export const AdminCmsPage: React.FC = () => {
                     value={orderSearch}
                     onChange={(e) => setOrderSearch(e.target.value)}
                     placeholder={t(
-                      'Tìm mã đơn hàng, tên khách, SĐT, mã vận đơn hoặc tên sản phẩm...',
-                      'Search order #, customer, phone, tracking, or item...'
+                      'Tìm mã đơn hàng, SĐT, email, tên khách, vận đơn hoặc SKU...',
+                      'Search order #, phone, email, customer, tracking, or SKU...'
                     )}
                     className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-[#00552B]"
                   />
@@ -1625,7 +1659,10 @@ export const AdminCmsPage: React.FC = () => {
                                     {lang === 'en' ? it.product_name_en : it.product_name_vi}
                                   </p>
                                   <p className="text-[11px] text-slate-500">
-                                    {it.sku} · {localizeVariantLabel(it.variant_label, lang)} · ×{it.quantity}
+                                    {it.sku} · {localizeVariantLabel(it.variant_label, lang)} ·{' '}
+                                    {it.unit === 'kg'
+                                      ? `${it.quantity} kg (${Number(it.unit_price_vnd || 0).toLocaleString()} ₫/kg)`
+                                      : `×${it.quantity}`}
                                   </p>
                                 </div>
                                 <span className="font-mono font-semibold text-slate-800 tabular-nums shrink-0">
@@ -1655,9 +1692,9 @@ export const AdminCmsPage: React.FC = () => {
                             <span className="text-lg font-bold font-mono text-[#00552B] tabular-nums">
                               {o.total.toLocaleString()} ₫
                             </span>
-                            {o.points_earned > 0 && (
+                            {o.points_awarded > 0 && (
                               <span className="text-[11px] text-emerald-700 font-medium tabular-nums">
-                                +{o.points_earned} {t('điểm thưởng', 'pts')}
+                                +{o.points_awarded} {t('điểm thưởng', 'pts')}
                               </span>
                             )}
                             <div className="flex items-center gap-1.5 mt-1 w-full lg:w-auto">
@@ -2594,7 +2631,10 @@ export const AdminCmsPage: React.FC = () => {
                             {lang === 'en' ? it.product_name_en : it.product_name_vi}
                           </p>
                           <p className="text-[11px] text-slate-500">
-                            {it.sku} · {localizeVariantLabel(it.variant_label, lang)} · ×{it.quantity}
+                            {it.sku} · {localizeVariantLabel(it.variant_label, lang)} ·{' '}
+                            {it.unit === 'kg'
+                              ? `${it.quantity} kg (${Number(it.unit_price_vnd || 0).toLocaleString()} ₫/kg)`
+                              : `×${it.quantity}`}
                           </p>
                         </div>
                         <span className="font-mono font-bold tabular-nums">{it.line_total_vnd.toLocaleString()} ₫</span>
@@ -2615,10 +2655,10 @@ export const AdminCmsPage: React.FC = () => {
                       <span className="text-slate-500">{t('Tạm tính:', 'Subtotal:')}</span>
                       <span className="font-mono">{(resolvingOrder.subtotal || 0).toLocaleString()} ₫</span>
                     </div>
-                    {resolvingOrder.discount > 0 && (
+                    {resolvingOrder.discount_amount > 0 && (
                       <div className="flex justify-between text-emerald-700">
                         <span>{t('Giảm giá / Voucher:', 'Discount:')}</span>
-                        <span className="font-mono">-{resolvingOrder.discount.toLocaleString()} ₫</span>
+                        <span className="font-mono">-{resolvingOrder.discount_amount.toLocaleString()} ₫</span>
                       </div>
                     )}
                     {resolvingOrder.points_discount > 0 && (

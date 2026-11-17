@@ -28,7 +28,9 @@ const VARIANT_VI_MAP: Record<string, string> = {
 };
 
 export function localizeVariantLabel(label: string, lang: Lang): string {
-  if (lang === 'en') return label;
+  if (lang === 'en') {
+    return label.replace(/Sỉ:\s*≥\s*100\s*kg/gi, 'Wholesale: ≥100 kg');
+  }
   return VARIANT_VI_MAP[label] || label;
 }
 

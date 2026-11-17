@@ -118,6 +118,11 @@ export const CartDrawer: React.FC = () => {
                   <p className="text-xs text-[#202020]/60 dark:text-[#F1EFEA]/60 mt-0.5">
                     {item.sku} · {localizeVariantLabel(item.variantLabel, lang)}
                   </p>
+                  {(item.unit === 'kg' || (item.pricingTiers?.length || 0) > 0) && (
+                    <p className="text-[11px] font-mono text-[#00552B] dark:text-[#C6A667] mt-0.5 tabular-nums">
+                      {formatPrice(item.unitPriceVnd, item.unitPriceUsd)}/kg × {item.quantity} kg
+                    </p>
+                  )}
                   <div className="flex items-center justify-between mt-3">
                     <div className="inline-flex items-center border border-[#202020]/15 dark:border-white/15 rounded">
                       <button
@@ -127,7 +132,21 @@ export const CartDrawer: React.FC = () => {
                       >
                         <Minus className="w-3 h-3" />
                       </button>
-                      <span className="px-2.5 text-xs font-medium tabular-nums">{item.quantity}</span>
+                      {item.unit === 'kg' || (item.pricingTiers?.length || 0) > 0 ? (
+                        <input
+                          type="number"
+                          min={1}
+                          max={100000}
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const val = Math.floor(Number(e.target.value) || 0);
+                            if (val >= 1) updateCartQty(item.productId, item.variantLabel, val);
+                          }}
+                          className="w-12 text-center text-xs font-medium bg-transparent focus:outline-none tabular-nums"
+                        />
+                      ) : (
+                        <span className="px-2.5 text-xs font-medium tabular-nums">{item.quantity}</span>
+                      )}
                       <button
                         type="button"
                         onClick={() => updateCartQty(item.productId, item.variantLabel, item.quantity + 1)}

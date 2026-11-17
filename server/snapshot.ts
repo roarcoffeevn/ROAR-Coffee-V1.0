@@ -119,17 +119,18 @@ export function restoreFromSnapshot(db: Database.Database, options: { force?: bo
     if (Array.isArray(t.products) && t.products.length > 0 && (force || countOf('products') === 0)) {
       const upsertProd = db.prepare(`
         INSERT INTO products (
-          slug, sku, category, sub_category, name_vi, name_en, subtitle_vi, subtitle_en,
+          slug, sku, barcode, category, sub_category, name_vi, name_en, subtitle_vi, subtitle_en,
           description_vi, description_en, coffee_type, blend_summary_vi, blend_summary_en, blend_public,
           roast_profile_vi, roast_profile_en, tasting_notes_vi, tasting_notes_en,
-          brewing_methods_json, variants_json, packaging_options_json,
+          brewing_methods_json, variants_json, pricing_tiers_json, packaging_options_json,
           price_vnd, price_usd, inventory, moq, status, is_demo_data,
           mascot_slug, screen_size, processing_method, origin_region,
           harvest_year, moisture_content, density, defect_info, grading_spec,
           image_key, gallery_images_json, featured, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(slug) DO UPDATE SET
           sku = excluded.sku,
+          barcode = excluded.barcode,
           category = excluded.category,
           sub_category = excluded.sub_category,
           name_vi = excluded.name_vi,
@@ -148,6 +149,7 @@ export function restoreFromSnapshot(db: Database.Database, options: { force?: bo
           tasting_notes_en = excluded.tasting_notes_en,
           brewing_methods_json = excluded.brewing_methods_json,
           variants_json = excluded.variants_json,
+          pricing_tiers_json = excluded.pricing_tiers_json,
           packaging_options_json = excluded.packaging_options_json,
           price_vnd = excluded.price_vnd,
           price_usd = excluded.price_usd,
@@ -170,10 +172,10 @@ export function restoreFromSnapshot(db: Database.Database, options: { force?: bo
       `);
       for (const p of t.products) {
         upsertProd.run(
-          p.slug, p.sku, p.category, p.sub_category || '', p.name_vi, p.name_en, p.subtitle_vi || '', p.subtitle_en || '',
+          p.slug, p.sku, p.barcode || '', p.category, p.sub_category || '', p.name_vi, p.name_en, p.subtitle_vi || '', p.subtitle_en || '',
           p.description_vi, p.description_en, p.coffee_type, p.blend_summary_vi || '', p.blend_summary_en || '', p.blend_public ?? 1,
           p.roast_profile_vi || '', p.roast_profile_en || '', p.tasting_notes_vi || '', p.tasting_notes_en || '',
-          p.brewing_methods_json || '[]', p.variants_json || '[]', p.packaging_options_json || '[]',
+          p.brewing_methods_json || '[]', p.variants_json || '[]', p.pricing_tiers_json || '[]', p.packaging_options_json || '[]',
           p.price_vnd || 0, p.price_usd || 0, p.inventory || 0, p.moq || '1', p.status || 'active', p.is_demo_data ?? 1,
           p.mascot_slug || '', p.screen_size || '', p.processing_method || '', p.origin_region || '',
           p.harvest_year || '', p.moisture_content || '', p.density || '', p.defect_info || '', p.grading_spec || '',

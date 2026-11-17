@@ -33,6 +33,11 @@ import {
   GeminiTranslationError,
   translateProductViToEn,
 } from './server/gemini.ts';
+import {
+  generateEan13Barcode,
+  normalizeVolumeTiers,
+  resolveVolumeTier,
+} from './src/lib/pricing.ts';
 
 initDatabase();
 
@@ -468,7 +473,9 @@ app.get('/api/account/dashboard', requireAuth, (req: AuthedRequest, res) => {
   const ordersWithItems = orders.map((o) => ({
     ...o,
     items: db
-      .prepare('SELECT oi.*, p.slug as product_slug, p.image_key as product_image_key FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?')
+      .prepare(
+        "SELECT oi.*, p.slug as product_slug, p.image_key as product_image_key, p.category as product_category, CASE WHEN p.category = 'roasted_beans' OR (p.pricing_tiers_json IS NOT NULL AND p.pricing_tiers_json != '[]' AND p.pricing_tiers_json != '') THEN 'kg' ELSE 'unit' END as unit FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?"
+      )
       .all(o.id),
   }));
   const now = new Date().toISOString().slice(0, 10);
@@ -601,18 +608,20 @@ app.get('/api/products', (req, res) => {
   }
   if (search) {
     const q = `%${String(search).trim().toLowerCase()}%`;
-    sql += ' AND (LOWER(name_vi) LIKE ? OR LOWER(name_en) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(coffee_type) LIKE ? OR LOWER(origin_region) LIKE ?)';
-    params.push(q, q, q, q, q);
+    sql += ' AND (LOWER(name_vi) LIKE ? OR LOWER(name_en) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(barcode) LIKE ? OR LOWER(sub_category) LIKE ? OR LOWER(grading_spec) LIKE ? OR LOWER(coffee_type) LIKE ? OR LOWER(origin_region) LIKE ?)';
+    params.push(q, q, q, q, q, q, q, q);
   }
 
   sql += ' ORDER BY featured DESC, id ASC';
   const rows = db.prepare(sql).all(...params) as any[];
   const products = rows.map((p) => ({
     ...p,
+    barcode: p.barcode || '',
     blend_summary_vi: p.blend_public ? p.blend_summary_vi : 'Tỷ lệ phối trộn bảo mật nội bộ',
     blend_summary_en: p.blend_public ? p.blend_summary_en : 'Confidential proprietary blend ratio',
     brewing_methods: JSON.parse(p.brewing_methods_json || '[]'),
     variants: JSON.parse(p.variants_json || '[]'),
+    pricing_tiers: JSON.parse(p.pricing_tiers_json || '[]'),
     packaging_options: JSON.parse(p.packaging_options_json || '[]'),
     gallery_images: JSON.parse(p.gallery_images_json || '[]'),
   }));
@@ -635,17 +644,21 @@ app.get('/api/products/:slug', (req, res) => {
   res.json({
     product: {
       ...p,
+      barcode: p.barcode || '',
       blend_summary_vi: p.blend_public ? p.blend_summary_vi : 'Tỷ lệ phối trộn bảo mật nội bộ',
       blend_summary_en: p.blend_public ? p.blend_summary_en : 'Confidential proprietary blend ratio',
       brewing_methods: JSON.parse(p.brewing_methods_json || '[]'),
       variants: JSON.parse(p.variants_json || '[]'),
+      pricing_tiers: JSON.parse(p.pricing_tiers_json || '[]'),
       packaging_options: JSON.parse(p.packaging_options_json || '[]'),
       gallery_images: JSON.parse(p.gallery_images_json || '[]'),
     },
     reviews,
     related: related.map((r) => ({
       ...r,
+      barcode: r.barcode || '',
       variants: JSON.parse(r.variants_json || '[]'),
+      pricing_tiers: JSON.parse(r.pricing_tiers_json || '[]'),
       gallery_images: JSON.parse(r.gallery_images_json || '[]'),
     })),
   });
@@ -769,9 +782,26 @@ app.post('/api/orders', (req: AuthedRequest, res) => {
       const product = db.prepare('SELECT * FROM products WHERE id = ?').get(Number(item.productId)) as any;
       if (!product) throw new Error('Product not found in catalog');
       const qty = Math.max(1, Number(item.quantity || 1));
+      const pricingTiers = JSON.parse(product.pricing_tiers_json || '[]');
       const variants = JSON.parse(product.variants_json || '[]') as Array<{ label: string; priceVnd: number }>;
-      const matchedVariant = variants.find((v) => v.label === item.variantLabel);
-      const unitPriceVnd = matchedVariant ? matchedVariant.priceVnd : product.price_vnd;
+
+      let unitPriceVnd = product.price_vnd;
+      let variantLabel = String(item.variantLabel || 'Standard');
+
+      if (Array.isArray(pricingTiers) && pricingTiers.length > 0) {
+        const tier = resolveVolumeTier(pricingTiers, qty);
+        if (tier) {
+          unitPriceVnd = tier.priceVnd;
+          variantLabel = `${qty} kg (${tier.labelVi})`;
+        } else {
+          variantLabel = `${qty} kg`;
+        }
+      } else {
+        const matchedVariant = variants.find((v) => v.label === item.variantLabel);
+        unitPriceVnd = matchedVariant ? matchedVariant.priceVnd : product.price_vnd;
+        variantLabel = matchedVariant ? matchedVariant.label : String(item.variantLabel || 'Standard');
+      }
+
       const lineTotalVnd = unitPriceVnd * qty;
       subtotal += lineTotalVnd;
       resolvedItems.push({
@@ -779,7 +809,7 @@ app.post('/api/orders', (req: AuthedRequest, res) => {
         sku: product.sku,
         nameVi: product.name_vi,
         nameEn: product.name_en,
-        variantLabel: matchedVariant ? matchedVariant.label : String(item.variantLabel || 'Standard'),
+        variantLabel,
         quantity: qty,
         unitPriceVnd,
         lineTotalVnd,
@@ -960,20 +990,90 @@ app.post('/api/orders/:orderNumber/confirm-payment-reference', (req, res) => {
 });
 
 app.get('/api/orders/track', (req, res) => {
-  const { orderNumber, email } = req.query;
-  if (!orderNumber || !email) {
-    res.status(400).json({ error: 'Order number and email are required' });
+  const rawOrderNumber = String(req.query.orderNumber || '').trim();
+  const rawPhone = String(req.query.phone || '').trim();
+  const rawEmail = String(req.query.email || '').trim().toLowerCase();
+  const rawQuery = String(req.query.q || '').trim();
+
+  if (!rawOrderNumber && !rawPhone && !rawEmail && !rawQuery) {
+    res.status(400).json({ error: 'Vui lòng nhập Mã đơn hàng, Số điện thoại hoặc Email để tra cứu.' });
     return;
   }
-  const order = db
-    .prepare('SELECT * FROM orders WHERE order_number = ? AND LOWER(customer_email) = ?')
-    .get(String(orderNumber).trim(), String(email).trim().toLowerCase()) as any;
-  if (!order) {
-    res.status(404).json({ error: 'Order not found' });
+
+  const normalizeDigits = (val: string) => val.replace(/\D/g, '');
+  const buildPhonePatterns = (val: string): string[] => {
+    const d = normalizeDigits(val);
+    if (!d) return [];
+    const candidates = new Set<string>([d]);
+    if (d.startsWith('84') && d.length >= 10) {
+      candidates.add(`0${d.slice(2)}`);
+    } else if (d.startsWith('0') && d.length >= 10) {
+      candidates.add(`84${d.slice(1)}`);
+    }
+    return Array.from(candidates);
+  };
+
+  let matchingOrders: any[] = [];
+  const phoneNormalizedSql = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(customer_phone, ' ', ''), '-', ''), '.', ''), '+', ''), '(', '')";
+
+  if (rawOrderNumber && rawEmail) {
+    matchingOrders = db
+      .prepare('SELECT * FROM orders WHERE UPPER(TRIM(order_number)) = ? AND LOWER(TRIM(customer_email)) = ? ORDER BY id DESC')
+      .all(rawOrderNumber.toUpperCase(), rawEmail) as any[];
+  } else if (rawOrderNumber) {
+    matchingOrders = db
+      .prepare('SELECT * FROM orders WHERE UPPER(TRIM(order_number)) = ? ORDER BY id DESC')
+      .all(rawOrderNumber.toUpperCase()) as any[];
+  } else if (rawEmail) {
+    matchingOrders = db
+      .prepare('SELECT * FROM orders WHERE LOWER(TRIM(customer_email)) = ? ORDER BY id DESC LIMIT 20')
+      .all(rawEmail) as any[];
+  } else if (rawPhone) {
+    const patterns = buildPhonePatterns(rawPhone);
+    if (patterns.length > 0) {
+      const placeholders = patterns.map(() => `${phoneNormalizedSql} = ?`).join(' OR ');
+      matchingOrders = db
+        .prepare(`SELECT * FROM orders WHERE (${placeholders}) ORDER BY id DESC LIMIT 20`)
+        .all(...patterns) as any[];
+    }
+  } else if (rawQuery) {
+    if (rawQuery.includes('@')) {
+      matchingOrders = db
+        .prepare('SELECT * FROM orders WHERE LOWER(TRIM(customer_email)) = ? ORDER BY id DESC LIMIT 20')
+        .all(rawQuery.toLowerCase()) as any[];
+    } else {
+      const byOrderNo = db
+        .prepare('SELECT * FROM orders WHERE UPPER(TRIM(order_number)) = ? ORDER BY id DESC')
+        .all(rawQuery.toUpperCase()) as any[];
+      if (byOrderNo.length > 0) {
+        matchingOrders = byOrderNo;
+      } else {
+        const patterns = buildPhonePatterns(rawQuery);
+        if (patterns.length > 0) {
+          const placeholders = patterns.map(() => `${phoneNormalizedSql} = ?`).join(' OR ');
+          matchingOrders = db
+            .prepare(`SELECT * FROM orders WHERE (${placeholders}) ORDER BY id DESC LIMIT 20`)
+            .all(...patterns) as any[];
+        }
+      }
+    }
+  }
+
+  if (!matchingOrders || matchingOrders.length === 0) {
+    res.status(404).json({ error: 'Không tìm thấy đơn hàng phù hợp với thông tin đã nhập.' });
     return;
   }
-  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
-  res.json({ order: { ...order, items } });
+
+  const enriched = matchingOrders.map((o) => ({
+    ...o,
+    items: db
+      .prepare(
+        "SELECT oi.*, p.image_key as product_image_key, p.slug as product_slug, p.category as product_category, CASE WHEN p.category = 'roasted_beans' OR (p.pricing_tiers_json IS NOT NULL AND p.pricing_tiers_json != '[]' AND p.pricing_tiers_json != '') THEN 'kg' ELSE 'unit' END as unit FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?"
+      )
+      .all(o.id),
+  }));
+
+  res.json({ orders: enriched, order: enriched[0] });
 });
 
 app.post('/api/orders/:orderNumber/request-action', requireAuth, (req: AuthedRequest, res) => {
@@ -1160,15 +1260,17 @@ app.get('/api/admin/products', requirePermission('products'), (_req, res) => {
   const rows = db.prepare('SELECT * FROM products ORDER BY category ASC, id DESC').all() as any[];
   const products = rows.map((p) => ({
     ...p,
+    barcode: p.barcode || '',
     brewing_methods: JSON.parse(p.brewing_methods_json || '[]'),
     variants: JSON.parse(p.variants_json || '[]'),
+    pricing_tiers: JSON.parse(p.pricing_tiers_json || '[]'),
     packaging_options: JSON.parse(p.packaging_options_json || '[]'),
     gallery_images: JSON.parse(p.gallery_images_json || '[]'),
   }));
   res.json({ products });
 });
 
-app.post('/api/admin/products', requirePermission('products'), (req: AuthedRequest, res) => {
+app.post('/api/admin/products', requirePermission('products'), async (req: AuthedRequest, res) => {
   const b = req.body || {};
   if (!b.sku || !b.name_vi || !b.category) {
     res.status(400).json({ error: 'Vui lòng nhập Mã SKU, Tên sản phẩm và Danh mục.' });
@@ -1180,21 +1282,42 @@ app.post('/api/admin/products', requirePermission('products'), (req: AuthedReque
     res.status(409).json({ error: 'Mã SKU hoặc đường dẫn (slug) đã tồn tại.' });
     return;
   }
+  const vcb = await getVietcombankUsdRate(db);
+  const pricingTiers = Array.isArray(b.pricing_tiers) ? normalizeVolumeTiers(b.pricing_tiers, vcb.activeRate) : [];
+  const effectivePriceVnd =
+    pricingTiers.length > 0 && (b.category === 'roasted_beans' || !Number(b.price_vnd))
+      ? pricingTiers[0].priceVnd
+      : Number(b.price_vnd || 0);
+  const effectivePriceUsd =
+    Number(b.price_usd) > 0
+      ? Number(b.price_usd)
+      : pricingTiers.length > 0
+        ? pricingTiers[0].priceUsd
+        : convertVndToUsdByRate(effectivePriceVnd, vcb.activeRate);
+  const effectiveVariants =
+    pricingTiers.length > 0 && b.category === 'roasted_beans'
+      ? pricingTiers.map((t) => ({ label: t.labelVi, priceVnd: t.priceVnd, priceUsd: t.priceUsd }))
+      : Array.isArray(b.variants)
+        ? b.variants
+        : [];
+  const effectiveBarcode = String(b.barcode || '').trim() || generateEan13Barcode(`${b.sku}-${Date.now()}`);
+
   const result = db
     .prepare(`
       INSERT INTO products (
-        slug, sku, category, sub_category, name_vi, name_en, subtitle_vi, subtitle_en,
+        slug, sku, barcode, category, sub_category, name_vi, name_en, subtitle_vi, subtitle_en,
         description_vi, description_en, coffee_type, blend_summary_vi, blend_summary_en, blend_public,
         roast_profile_vi, roast_profile_en, tasting_notes_vi, tasting_notes_en,
-        brewing_methods_json, variants_json, packaging_options_json,
+        brewing_methods_json, variants_json, pricing_tiers_json, packaging_options_json,
         price_vnd, price_usd, inventory, moq, status, is_demo_data,
         mascot_slug, screen_size, processing_method, origin_region,
         harvest_year, moisture_content, density, defect_info, grading_spec, image_key, gallery_images_json, featured
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       slug,
       String(b.sku).trim(),
+      effectiveBarcode,
       b.category,
       b.sub_category || '',
       String(b.name_vi).trim(),
@@ -1212,12 +1335,13 @@ app.post('/api/admin/products', requirePermission('products'), (req: AuthedReque
       b.tasting_notes_vi || '',
       b.tasting_notes_en || b.tasting_notes_vi || '',
       JSON.stringify(Array.isArray(b.brewing_methods) ? b.brewing_methods : []),
-      JSON.stringify(Array.isArray(b.variants) ? b.variants : []),
+      JSON.stringify(effectiveVariants),
+      JSON.stringify(pricingTiers),
       JSON.stringify(Array.isArray(b.packaging_options) ? b.packaging_options : []),
-      Number(b.price_vnd || 0),
-      Number(b.price_usd || 0),
+      effectivePriceVnd,
+      effectivePriceUsd,
       Number(b.inventory || 0),
-      b.moq || '1',
+      b.moq || (b.category === 'roasted_beans' ? '1 kg' : '1'),
       b.status || 'active',
       b.is_demo_data ? 1 : 0,
       b.mascot_slug || '',
@@ -1234,9 +1358,9 @@ app.post('/api/admin/products', requirePermission('products'), (req: AuthedReque
       b.featured ? 1 : 0
     );
 
-  logAudit(req.authUser!.userId, req.authUser!.email, 'CREATE_PRODUCT', 'product', Number(result.lastInsertRowid), { sku: b.sku });
+  logAudit(req.authUser!.userId, req.authUser!.email, 'CREATE_PRODUCT', 'product', Number(result.lastInsertRowid), { sku: b.sku, barcode: effectiveBarcode });
   scheduleSnapshotSync(db);
-  res.status(201).json({ ok: true, id: Number(result.lastInsertRowid) });
+  res.status(201).json({ ok: true, id: Number(result.lastInsertRowid), barcode: effectiveBarcode });
 });
 
 app.patch('/api/admin/products/:id', requirePermission('products'), async (req: AuthedRequest, res) => {
@@ -1248,20 +1372,42 @@ app.patch('/api/admin/products/:id', requirePermission('products'), async (req: 
   }
   const b = req.body || {};
   const nextSlug = b.slug ? toSafeSlug(b.slug) || existing.slug : existing.slug;
+  const vcb = await getVietcombankUsdRate(db);
+
+  const nextCategory = b.category ?? existing.category;
+  const nextPricingTiers =
+    b.pricing_tiers !== undefined
+      ? normalizeVolumeTiers(b.pricing_tiers, vcb.activeRate)
+      : JSON.parse(existing.pricing_tiers_json || '[]');
+
+  let resolvedPriceVnd = b.price_vnd !== undefined ? Number(b.price_vnd) : existing.price_vnd;
   let resolvedPriceUsd = b.price_usd !== undefined ? Number(b.price_usd) : existing.price_usd;
-  if (b.price_vnd !== undefined && b.price_usd === undefined) {
-    const vcb = await getVietcombankUsdRate(db);
+
+  if (nextCategory === 'roasted_beans' && nextPricingTiers.length > 0 && b.pricing_tiers !== undefined) {
+    resolvedPriceVnd = nextPricingTiers[0].priceVnd;
+    resolvedPriceUsd = nextPricingTiers[0].priceUsd;
+  } else if (b.price_vnd !== undefined && b.price_usd === undefined) {
     resolvedPriceUsd = convertVndToUsdByRate(Number(b.price_vnd), vcb.activeRate);
   }
+
+  const nextVariantsJson =
+    b.pricing_tiers !== undefined && nextCategory === 'roasted_beans' && nextPricingTiers.length > 0
+      ? JSON.stringify(nextPricingTiers.map((t: any) => ({ label: t.labelVi, priceVnd: t.priceVnd, priceUsd: t.priceUsd })))
+      : b.variants !== undefined
+        ? JSON.stringify(b.variants)
+        : existing.variants_json;
+
+  const nextBarcode = b.barcode !== undefined ? String(b.barcode).trim() : existing.barcode || '';
+
   db.prepare(`
     UPDATE products SET
-      sku = ?, slug = ?, category = ?, sub_category = ?,
+      sku = ?, barcode = ?, slug = ?, category = ?, sub_category = ?,
       name_vi = ?, name_en = ?, subtitle_vi = ?, subtitle_en = ?,
       description_vi = ?, description_en = ?, coffee_type = ?,
       blend_summary_vi = ?, blend_summary_en = ?, blend_public = ?,
       roast_profile_vi = ?, roast_profile_en = ?,
       tasting_notes_vi = ?, tasting_notes_en = ?,
-      brewing_methods_json = ?, variants_json = ?, packaging_options_json = ?,
+      brewing_methods_json = ?, variants_json = ?, pricing_tiers_json = ?, packaging_options_json = ?,
       price_vnd = ?, price_usd = ?, inventory = ?, moq = ?, status = ?,
       mascot_slug = ?, screen_size = ?, processing_method = ?, origin_region = ?,
       harvest_year = ?, moisture_content = ?, density = ?, defect_info = ?,
@@ -1269,8 +1415,9 @@ app.patch('/api/admin/products/:id', requirePermission('products'), async (req: 
     WHERE id = ?
   `).run(
     b.sku ?? existing.sku,
+    nextBarcode,
     nextSlug,
-    b.category ?? existing.category,
+    nextCategory,
     b.sub_category ?? existing.sub_category,
     b.name_vi ?? existing.name_vi,
     b.name_en ?? existing.name_en,
@@ -1287,9 +1434,10 @@ app.patch('/api/admin/products/:id', requirePermission('products'), async (req: 
     b.tasting_notes_vi ?? existing.tasting_notes_vi,
     b.tasting_notes_en ?? existing.tasting_notes_en,
     b.brewing_methods !== undefined ? JSON.stringify(b.brewing_methods) : existing.brewing_methods_json,
-    b.variants !== undefined ? JSON.stringify(b.variants) : existing.variants_json,
+    nextVariantsJson,
+    b.pricing_tiers !== undefined ? JSON.stringify(nextPricingTiers) : existing.pricing_tiers_json,
     b.packaging_options !== undefined ? JSON.stringify(b.packaging_options) : existing.packaging_options_json,
-    b.price_vnd !== undefined ? Number(b.price_vnd) : existing.price_vnd,
+    resolvedPriceVnd,
     resolvedPriceUsd,
     b.inventory !== undefined ? Number(b.inventory) : existing.inventory,
     b.moq ?? existing.moq,
@@ -1308,9 +1456,9 @@ app.patch('/api/admin/products/:id', requirePermission('products'), async (req: 
     b.featured !== undefined ? (b.featured ? 1 : 0) : existing.featured,
     id
   );
-  logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_PRODUCT', 'product', id, { sku: b.sku ?? existing.sku });
+  logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_PRODUCT', 'product', id, { sku: b.sku ?? existing.sku, barcode: nextBarcode });
   scheduleSnapshotSync(db);
-  res.json({ ok: true, price_usd: resolvedPriceUsd });
+  res.json({ ok: true, price_usd: resolvedPriceUsd, barcode: nextBarcode });
 });
 
 app.delete('/api/admin/products/:id', requirePermission('products'), (req: AuthedRequest, res) => {
@@ -1348,7 +1496,7 @@ app.get('/api/admin/orders', requirePermission('orders'), (_req, res) => {
     ...o,
     items: db
       .prepare(
-        'SELECT oi.*, p.image_key as product_image_key, p.slug as product_slug FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?'
+        "SELECT oi.*, p.image_key as product_image_key, p.slug as product_slug, p.category as product_category, CASE WHEN p.category = 'roasted_beans' OR (p.pricing_tiers_json IS NOT NULL AND p.pricing_tiers_json != '[]' AND p.pricing_tiers_json != '') THEN 'kg' ELSE 'unit' END as unit FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?"
       )
       .all(o.id),
   }));
@@ -2257,12 +2405,13 @@ app.post('/api/admin/exchange-rate/vietcombank/sync', requirePermission('product
 
   let updatedProducts = 0;
   if (applyToAllProducts) {
-    const allProducts = db.prepare('SELECT id, price_vnd, variants_json FROM products').all() as Array<{
+    const allProducts = db.prepare('SELECT id, price_vnd, variants_json, pricing_tiers_json FROM products').all() as Array<{
       id: number;
       price_vnd: number;
       variants_json: string;
+      pricing_tiers_json: string;
     }>;
-    const updStmt = db.prepare('UPDATE products SET price_usd = ?, variants_json = ? WHERE id = ?');
+    const updStmt = db.prepare('UPDATE products SET price_usd = ?, variants_json = ?, pricing_tiers_json = ? WHERE id = ?');
     const tx = db.transaction(() => {
       for (const p of allProducts) {
         const nextUsd = convertVndToUsdByRate(p.price_vnd, rate.activeRate);
@@ -2281,7 +2430,24 @@ app.post('/api/admin/exchange-rate/vietcombank/sync', requirePermission('product
                   : Number(v.priceUsd || 0),
             }))
           : [];
-        updStmt.run(nextUsd, JSON.stringify(nextVariants), p.id);
+
+        let pricingTiers: any[] = [];
+        try {
+          pricingTiers = JSON.parse(p.pricing_tiers_json || '[]');
+        } catch {
+          pricingTiers = [];
+        }
+        const nextTiers = Array.isArray(pricingTiers)
+          ? pricingTiers.map((t) => ({
+              ...t,
+              priceUsd:
+                Number(t.priceVnd) > 0
+                  ? convertVndToUsdByRate(Number(t.priceVnd), rate.activeRate)
+                  : Number(t.priceUsd || 0),
+            }))
+          : [];
+
+        updStmt.run(nextUsd, JSON.stringify(nextVariants), JSON.stringify(nextTiers), p.id);
         updatedProducts += 1;
       }
     });

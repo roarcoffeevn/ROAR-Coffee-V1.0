@@ -1,6 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { fetchBootstrapWithFallback } from '../lib/staticFallback';
 import type { RawGalleryItem } from '../lib/media';
+import { resolveVolumeTier, type VolumePriceTier } from '../lib/pricing';
+
+export type { VolumePriceTier };
 
 export interface ProductVariant {
   label: string;
@@ -12,7 +15,8 @@ export interface Product {
   id: number;
   slug: string;
   sku: string;
-  category: 'roasted' | 'green_bean' | 'instant';
+  barcode?: string;
+  category: 'roasted' | 'roasted_beans' | 'green_bean' | 'instant';
   sub_category: string;
   name_vi: string;
   name_en: string;
@@ -30,6 +34,7 @@ export interface Product {
   tasting_notes_en: string;
   brewing_methods: string[];
   variants: ProductVariant[];
+  pricing_tiers?: VolumePriceTier[];
   packaging_options: string[];
   price_vnd: number;
   price_usd: number;
@@ -62,6 +67,8 @@ export interface CartItem {
   unitPriceUsd: number;
   quantity: number;
   imageKey: string;
+  unit?: 'kg' | 'unit';
+  pricingTiers?: VolumePriceTier[];
 }
 
 export interface AuthUser {
@@ -429,12 +436,47 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addToCart = (item: CartItem) => {
     setCart((prev) => {
-      const idx = prev.findIndex((i) => i.productId === item.productId && i.variantLabel === item.variantLabel);
+      const isKg = item.unit === 'kg' || (Array.isArray(item.pricingTiers) && item.pricingTiers.length > 0);
+      const idx = isKg
+        ? prev.findIndex((i) => i.productId === item.productId && (i.unit === 'kg' || (i.pricingTiers?.length || 0) > 0))
+        : prev.findIndex((i) => i.productId === item.productId && i.variantLabel === item.variantLabel);
+
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = { ...next[idx], quantity: next[idx].quantity + item.quantity };
+        const existing = next[idx];
+        const nextQty = existing.quantity + item.quantity;
+        const tiers = item.pricingTiers?.length ? item.pricingTiers : existing.pricingTiers;
+        if (isKg && tiers && tiers.length > 0) {
+          const tier = resolveVolumeTier(tiers, nextQty);
+          next[idx] = {
+            ...existing,
+            quantity: nextQty,
+            unit: 'kg',
+            pricingTiers: tiers,
+            unitPriceVnd: tier ? tier.priceVnd : existing.unitPriceVnd,
+            unitPriceUsd: tier ? tier.priceUsd : existing.unitPriceUsd,
+            variantLabel: tier ? `${nextQty} kg · ${tier.labelVi}` : `${nextQty} kg`,
+          };
+        } else {
+          next[idx] = { ...existing, quantity: nextQty };
+        }
         return next;
       }
+
+      if (isKg && item.pricingTiers && item.pricingTiers.length > 0) {
+        const tier = resolveVolumeTier(item.pricingTiers, item.quantity);
+        return [
+          ...prev,
+          {
+            ...item,
+            unit: 'kg',
+            unitPriceVnd: tier ? tier.priceVnd : item.unitPriceVnd,
+            unitPriceUsd: tier ? tier.priceUsd : item.unitPriceUsd,
+            variantLabel: tier ? `${item.quantity} kg · ${tier.labelVi}` : `${item.quantity} kg`,
+          },
+        ];
+      }
+
       return [...prev, item];
     });
     setCartOpen(true);
@@ -446,7 +488,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     setCart((prev) =>
-      prev.map((i) => (i.productId === productId && i.variantLabel === variantLabel ? { ...i, quantity: qty } : i))
+      prev.map((i) => {
+        if (i.productId !== productId || i.variantLabel !== variantLabel) return i;
+        if (i.pricingTiers && i.pricingTiers.length > 0) {
+          const tier = resolveVolumeTier(i.pricingTiers, qty);
+          return {
+            ...i,
+            quantity: qty,
+            unit: 'kg',
+            unitPriceVnd: tier ? tier.priceVnd : i.unitPriceVnd,
+            unitPriceUsd: tier ? tier.priceUsd : i.unitPriceUsd,
+            variantLabel: tier ? `${qty} kg · ${tier.labelVi}` : `${qty} kg`,
+          };
+        }
+        return { ...i, quantity: qty };
+      })
     );
   };
 
@@ -474,7 +530,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return `${vnd.toLocaleString('vi-VN')} ₫`;
   };
 
-  const cartCount = cart.reduce((acc, i) => acc + i.quantity, 0);
+  const cartCount = cart.reduce((acc, i) => acc + (i.unit === 'kg' ? 1 : i.quantity), 0);
   const cartSubtotalVnd = cart.reduce((acc, i) => acc + i.unitPriceVnd * i.quantity, 0);
 
   return (
