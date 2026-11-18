@@ -87,13 +87,12 @@ export const AccountPage: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('/api/auth/login', {
+    const res = await apiFetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ email, password }),
     });
-    const d = await res.json();
+    const d = await res.json().catch(() => ({}));
     if (res.ok && d.user) {
       setAuthSession(d.user, d.token);
       showToast(t('Đăng nhập thành công', 'Signed in successfully'));
@@ -104,13 +103,12 @@ export const AccountPage: React.FC = () => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('/api/auth/register', {
+    const res = await apiFetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ email, password, fullName, phone, roleIntent, companyName }),
     });
-    const d = await res.json();
+    const d = await res.json().catch(() => ({}));
     if (res.ok && d.user) {
       setAuthSession(d.user, d.token);
       showToast(t('Tạo tài khoản ROAR Member thành công!', 'Welcome to ROAR COFFEE Members!'));

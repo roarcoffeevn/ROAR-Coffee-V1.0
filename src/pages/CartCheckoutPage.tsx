@@ -1,10 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Banknote, Check, CheckCircle2, Copy, Minus, Plus, QrCode, ShieldCheck, Smartphone, Trash2, Wallet } from 'lucide-react';
+import { Banknote, Check, CheckCircle2, Copy, Minus, Plus, QrCode, ShieldCheck, Smartphone, Tag, Trash2, Wallet } from 'lucide-react';
 import { MediaImage } from '../components/MediaImage';
 import { useI18n } from '../i18n/I18nContext';
 import { useStore } from '../context/StoreContext';
 import { localizeOrderStatus, localizeVariantLabel } from '../lib/i18nHelpers';
+import { calculateShippingFee } from '../lib/pricing';
+import { fetchPromotionsWithFallback } from '../lib/staticFallback';
 
 interface PaymentMethodOption {
   id: string;
@@ -375,7 +377,8 @@ const PaymentQRPanel: React.FC<{
 
 export const CartPage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
-  const { cart, updateCartQty, removeFromCart, cartSubtotalVnd, formatPrice } = useStore();
+  const { cart, updateCartQty, removeFromCart, cartSubtotalVnd, formatPrice, settings } = useStore();
+  const cartShipping = calculateShippingFee(cartSubtotalVnd, settings);
 
   return (
     <div className="max-w-[1100px] mx-auto px-6 py-12 space-y-8">
@@ -446,7 +449,9 @@ export const CartPage: React.FC = () => {
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-[#202020]/70 dark:text-[#F1EFEA]/70">{t('Phí vận chuyển ước tính', 'Est. Shipping')}</span>
-              <span className="font-medium tabular-nums">{cartSubtotalVnd >= 500000 ? t('Miễn phí', 'Free') : formatPrice(35000)}</span>
+              <span className="font-medium tabular-nums">
+                {cartShipping.feeVnd === 0 ? t('Miễn phí', 'Free') : formatPrice(cartShipping.feeVnd)}
+              </span>
             </div>
             <Link
               to={localePath('/checkout')}
@@ -463,7 +468,7 @@ export const CartPage: React.FC = () => {
 
 export const CheckoutPage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
-  const { cart, cartSubtotalVnd, formatPrice, currency, user, clearCart, refreshUser, showToast, apiFetch } = useStore();
+  const { cart, cartSubtotalVnd, formatPrice, currency, user, clearCart, refreshUser, showToast, apiFetch, settings } = useStore();
 
   const defaultAddr = user?.addresses?.find((a: any) => a.isDefault) || user?.addresses?.[0];
   const [customerName, setCustomerName] = useState(defaultAddr?.recipient || user?.fullName || '');
@@ -475,31 +480,49 @@ export const CheckoutPage: React.FC = () => {
 
   const [voucherCode, setVoucherCode] = useState('');
   const [voucherDiscount, setVoucherDiscount] = useState(0);
+  const [appliedVoucherType, setAppliedVoucherType] = useState<string>('');
   const [voucherMsg, setVoucherMsg] = useState('');
+  const [availablePromos, setAvailablePromos] = useState<any[]>([]);
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<any>(null);
 
+  useEffect(() => {
+    fetchPromotionsWithFallback()
+      .then((list) => setAvailablePromos(list || []))
+      .catch(() => {});
+  }, []);
+
   const availablePoints = user?.points?.available || 0;
   const maxRedeemPoints = Math.min(availablePoints, Math.floor((cartSubtotalVnd * 0.3) / 100));
   const pointsDiscount = pointsToRedeem * 100;
-  const shippingFee = cartSubtotalVnd >= 500000 ? 0 : 35000;
-  const grandTotal = Math.max(0, cartSubtotalVnd - voucherDiscount - pointsDiscount + shippingFee);
+  const shippingCalc = calculateShippingFee(cartSubtotalVnd, settings);
+  const shippingFee = appliedVoucherType === 'free_shipping' ? 0 : shippingCalc.feeVnd;
+  const effectiveVoucherDiscount = appliedVoucherType === 'free_shipping' ? 0 : voucherDiscount;
+  const grandTotal = Math.max(0, cartSubtotalVnd - effectiveVoucherDiscount - pointsDiscount + shippingFee);
   const selectedPaymentOption = getPaymentOption(paymentMethod);
 
-  const applyVoucher = async () => {
-    if (!voucherCode.trim()) return;
+  const applyVoucher = async (overrideCode?: string) => {
+    const codeToUse = (overrideCode ?? voucherCode).trim();
+    if (!codeToUse) return;
+    if (overrideCode !== undefined) setVoucherCode(codeToUse);
     const res = await apiFetch('/api/promotions/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: voucherCode.trim(), subtotal: cartSubtotalVnd }),
+      body: JSON.stringify({ code: codeToUse, subtotal: cartSubtotalVnd }),
     });
-    const d = await res.json();
+    const d = await res.json().catch(() => ({}));
     if (res.ok && d.valid) {
-      setVoucherDiscount(d.discountAmount);
-      setVoucherMsg(t(`Đã áp dụng mã ${d.promo.code}`, `Applied ${d.promo.code}`));
+      setVoucherDiscount(d.discountAmount || 0);
+      setAppliedVoucherType(d.promo?.discount_type || '');
+      setVoucherMsg(
+        d.promo?.discount_type === 'free_shipping'
+          ? t(`Đã áp dụng mã ${d.promo.code} (Miễn phí vận chuyển)`, `Applied ${d.promo.code} (Free Shipping)`)
+          : t(`Đã áp dụng mã ${d.promo.code} (-${formatPrice(d.discountAmount)})`, `Applied ${d.promo.code} (-${formatPrice(d.discountAmount)})`)
+      );
     } else {
       setVoucherDiscount(0);
+      setAppliedVoucherType('');
       setVoucherMsg(d.error || t('Mã không hợp lệ', 'Invalid code'));
     }
   };
@@ -694,7 +717,7 @@ export const CheckoutPage: React.FC = () => {
             ))}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -703,11 +726,94 @@ export const CheckoutPage: React.FC = () => {
                 placeholder={t('Nhập mã voucher (vd: ROARWELCOME10)', 'Promo code (e.g. ROARWELCOME10)')}
                 className="flex-1 bg-white dark:bg-[#0E1512] border border-[#202020]/15 dark:border-white/15 rounded px-3 py-2 text-xs font-mono uppercase"
               />
-              <button type="button" onClick={applyVoucher} className="px-4 py-2 bg-[#00552B] text-white text-xs font-medium rounded cursor-pointer">
+              <button
+                type="button"
+                onClick={() => applyVoucher()}
+                className="px-4 py-2 bg-[#00552B] text-white text-xs font-medium rounded cursor-pointer"
+              >
                 {t('Áp dụng', 'Apply')}
               </button>
             </div>
-            {voucherMsg && <p className="text-xs text-[#00552B] dark:text-[#C6A667]">{voucherMsg}</p>}
+            {voucherMsg && <p className="text-xs text-[#00552B] dark:text-[#C6A667] font-medium">{voucherMsg}</p>}
+
+            {/* Available & Suggested Vouchers Picker */}
+            {availablePromos.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <p className="text-[11px] font-semibold text-[#202020]/70 dark:text-[#F1EFEA]/70 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-[#00552B] dark:text-[#C6A667]" />
+                  <span>{t('Voucher khuyến mãi gợi ý cho bạn:', 'Suggested Vouchers for You:')}</span>
+                </p>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
+                  {availablePromos.map((promo) => {
+                    const minVal = Number(promo.min_order_value || 0);
+                    const needsMember = Boolean(promo.member_only) && !user;
+                    const meetsMin = cartSubtotalVnd >= minVal;
+                    const eligible = meetsMin && !needsMember;
+                    const isApplied =
+                      voucherCode.trim().toUpperCase() === String(promo.code || '').toUpperCase() &&
+                      (voucherDiscount > 0 || appliedVoucherType === 'free_shipping');
+
+                    const badgeText =
+                      promo.discount_type === 'percent'
+                        ? `-${promo.discount_value}%`
+                        : promo.discount_type === 'free_shipping'
+                          ? t('Freeship', 'Free Ship')
+                          : `-${formatPrice(promo.discount_value)}`;
+
+                    return (
+                      <div
+                        key={promo.id || promo.code}
+                        className={`flex items-center justify-between gap-2 p-2 rounded-lg border text-[11px] transition-colors ${
+                          isApplied
+                            ? 'border-[#00552B] bg-[#00552B]/10 dark:border-[#C6A667] dark:bg-[#C6A667]/10'
+                            : eligible
+                              ? 'border-[#202020]/12 dark:border-white/12 bg-[#F8F5EF]/70 dark:bg-[#0E1512]'
+                              : 'border-[#202020]/8 dark:border-white/8 bg-[#F8F5EF]/40 dark:bg-[#0E1512]/40 opacity-65'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono font-bold text-[#00552B] dark:text-[#C6A667]">{promo.code}</span>
+                            <span className="px-1.5 py-0.5 rounded bg-[#C6A667]/25 text-[#694f15] dark:text-[#C6A667] font-semibold text-[10px]">
+                              {badgeText}
+                            </span>
+                            {promo.member_only ? (
+                              <span className="text-[10px] text-[#202020]/60 dark:text-[#F1EFEA]/60">
+                                ({t('Thành viên', 'Member')})
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="text-[#202020]/70 dark:text-[#F1EFEA]/70 truncate mt-0.5">
+                            {lang === 'vi' ? promo.title_vi : promo.title_en}
+                            {minVal > 0 ? ` · ${t('Đơn từ', 'Min')} ${formatPrice(minVal)}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!eligible}
+                          onClick={() => applyVoucher(promo.code)}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold shrink-0 cursor-pointer disabled:cursor-not-allowed ${
+                            isApplied
+                              ? 'bg-[#00552B] text-white'
+                              : eligible
+                                ? 'border border-[#00552B] text-[#00552B] dark:border-[#C6A667] dark:text-[#C6A667] hover:bg-[#00552B] hover:text-white'
+                                : 'bg-slate-200 dark:bg-white/10 text-slate-500'
+                          }`}
+                        >
+                          {isApplied
+                            ? t('Đang dùng', 'Applied')
+                            : needsMember
+                              ? t('Cần ĐN', 'Login')
+                              : !meetsMin
+                                ? t('Chưa đủ', 'Min')
+                                : t('Chọn', 'Use')}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {user && maxRedeemPoints > 0 && (

@@ -139,3 +139,97 @@ export function isValidEan13(code: string): boolean {
   if (!/^\d{13}$/.test(clean)) return false;
   return computeEan13CheckDigit(clean.slice(0, 12)) === clean[12];
 }
+
+export interface ShippingRuleTier {
+  minSubtotal: number;
+  maxSubtotal: number | null;
+  feeVnd: number;
+  labelVi: string;
+  labelEn: string;
+}
+
+export const DEFAULT_SHIPPING_RULES: ShippingRuleTier[] = [
+  {
+    minSubtotal: 0,
+    maxSubtotal: 299999,
+    feeVnd: 35000,
+    labelVi: 'Đơn dưới 300.000 ₫',
+    labelEn: 'Orders under 300,000 VND',
+  },
+  {
+    minSubtotal: 300000,
+    maxSubtotal: 499999,
+    feeVnd: 20000,
+    labelVi: 'Đơn từ 300.000 ₫ – dưới 500.000 ₫',
+    labelEn: 'Orders 300,000 – 499,999 VND',
+  },
+  {
+    minSubtotal: 500000,
+    maxSubtotal: null,
+    feeVnd: 0,
+    labelVi: 'Đơn từ 500.000 ₫ (Miễn phí vận chuyển)',
+    labelEn: 'Orders ≥ 500,000 VND (Free Shipping)',
+  },
+];
+
+export function parseShippingRules(raw: unknown): ShippingRuleTier[] {
+  let list: any[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      return DEFAULT_SHIPPING_RULES;
+    }
+  } else {
+    return DEFAULT_SHIPPING_RULES;
+  }
+
+  const normalized = list
+    .map((item) => {
+      const minSubtotal = Math.max(0, Math.round(Number(item?.minSubtotal ?? 0)));
+      const maxRaw =
+        item?.maxSubtotal === null || item?.maxSubtotal === '' || item?.maxSubtotal === undefined
+          ? null
+          : Math.round(Number(item.maxSubtotal));
+      const maxSubtotal = maxRaw !== null && Number.isFinite(maxRaw) && maxRaw >= minSubtotal ? maxRaw : null;
+      const feeVnd = Math.max(0, Math.round(Number(item?.feeVnd ?? 0)));
+      return {
+        minSubtotal,
+        maxSubtotal,
+        feeVnd,
+        labelVi: String(item?.labelVi || (feeVnd === 0 ? `Miễn phí từ ${minSubtotal.toLocaleString('vi-VN')} ₫` : `Từ ${minSubtotal.toLocaleString('vi-VN')} ₫`)),
+        labelEn: String(item?.labelEn || (feeVnd === 0 ? `Free from ${minSubtotal.toLocaleString('en-US')} VND` : `From ${minSubtotal.toLocaleString('en-US')} VND`)),
+      };
+    })
+    .sort((a, b) => a.minSubtotal - b.minSubtotal);
+
+  return normalized.length > 0 ? normalized : DEFAULT_SHIPPING_RULES;
+}
+
+export function calculateShippingFee(
+  subtotalVnd: number,
+  settingsOrRules?: Record<string, string> | ShippingRuleTier[] | null
+): { feeVnd: number; matchedRule: ShippingRuleTier; freeThresholdVnd: number | null } {
+  const rules = Array.isArray(settingsOrRules)
+    ? parseShippingRules(settingsOrRules)
+    : parseShippingRules(settingsOrRules?.shipping_rules_json);
+
+  const sub = Math.max(0, Number(subtotalVnd || 0));
+  const exact = rules.find((r) => sub >= r.minSubtotal && (r.maxSubtotal === null || sub <= r.maxSubtotal));
+  let matched = exact || rules[0];
+  if (!exact) {
+    for (const r of rules) {
+      if (sub >= r.minSubtotal) matched = r;
+    }
+  }
+  const freeTier = rules.find((r) => r.feeVnd === 0 && r.minSubtotal > 0);
+  return {
+    feeVnd: matched.feeVnd,
+    matchedRule: matched,
+    freeThresholdVnd: freeTier ? freeTier.minSubtotal : null,
+  };
+}
+

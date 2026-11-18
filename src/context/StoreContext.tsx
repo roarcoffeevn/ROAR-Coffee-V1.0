@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { fetchBootstrapWithFallback } from '../lib/staticFallback';
+import { handleStaticApiFallback } from '../lib/staticRuntime';
 import type { RawGalleryItem } from '../lib/media';
 import { resolveVolumeTier, type VolumePriceTier } from '../lib/pricing';
 
@@ -298,17 +299,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const apiFetch = useCallback(
-    (input: RequestInfo | URL, init: RequestInit = {}) => {
+    async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const headers = new Headers(init.headers || {});
       const token = authToken || safeGetStorage('roar_auth_token');
       if (token && !headers.has('Authorization')) {
         headers.set('Authorization', `Bearer ${token}`);
       }
-      return fetch(input, {
-        ...init,
-        credentials: 'include',
-        headers,
-      });
+      try {
+        const res = await fetch(input, {
+          ...init,
+          credentials: 'include',
+          headers,
+        });
+        const ct = res.headers.get('content-type') || '';
+        const isJson = ct.includes('application/json');
+        // On static deployments (e.g. Vercel), /api/* returns 404 HTML or non-JSON
+        if (!isJson && (res.status === 404 || res.status === 405 || res.status >= 500 || ct.includes('text/html'))) {
+          const fallback = await handleStaticApiFallback(input, { ...init, headers });
+          if (fallback) return fallback;
+        }
+        return res;
+      } catch (err) {
+        const fallback = await handleStaticApiFallback(input, { ...init, headers });
+        if (fallback) return fallback;
+        throw err;
+      }
     },
     [authToken]
   );

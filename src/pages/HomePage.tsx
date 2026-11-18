@@ -189,7 +189,7 @@ export const HomePage: React.FC = () => {
 
   return (
     <div className="bg-[#F8F5EF] dark:bg-[#0E1512] text-[#202020] dark:text-[#F1EFEA] transition-colors">
-      {/* 1. DYNAMIC MULTI-SLIDE HERO BANNER CAROUSEL */}
+      {/* 1. COMPACT DYNAMIC MULTI-SLIDE HERO BANNER CAROUSEL */}
       <section
         className={`relative ${activeSlide.surfaceClass} text-white overflow-hidden transition-colors duration-700`}
         onMouseEnter={() => setHeroPaused(true)}
@@ -197,112 +197,172 @@ export const HomePage: React.FC = () => {
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        <div className="max-w-[1280px] mx-auto px-6 pt-12 pb-8 lg:pt-16 lg:pb-12 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
-          <div key={activeSlide.id} className="lg:col-span-6 flex flex-col justify-center space-y-6 transition-all duration-500">
-            <div className="flex items-center justify-between gap-4">
-              <AdaptiveLogo variant="horizontal" surface="dark" size="md" />
-              <span className="font-mono text-xs text-[#C6A667]/90 border border-[#C6A667]/30 px-2.5 py-1 rounded tabular-nums">
+        <div className="max-w-[1280px] mx-auto px-5 sm:px-6 pt-6 pb-5 lg:pt-8 lg:pb-7 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
+          <div key={activeSlide.id} className="lg:col-span-6 flex flex-col justify-center space-y-4 transition-all duration-500">
+            <div className="flex items-center justify-between gap-3">
+              <AdaptiveLogo variant="horizontal" surface="dark" size="sm" />
+              <span className="font-mono text-[11px] text-[#C6A667]/90 border border-[#C6A667]/30 px-2 py-0.5 rounded tabular-nums">
                 0{heroIdx + 1} / 0{HERO_SLIDES.length}
               </span>
             </div>
 
-            <div className="space-y-3">
-              <p className="text-xs font-semibold tracking-[0.16em] uppercase text-[#C6A667]">
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold tracking-[0.16em] uppercase text-[#C6A667]">
                 {lang === 'vi' ? activeSlide.badgeVi : activeSlide.badgeEn}
               </p>
-              <h1 className="text-[clamp(2.1rem,4vw,3.5rem)] leading-[1.1] font-bold tracking-tight text-balance">
+              <h1 className="text-[clamp(1.75rem,3.1vw,2.75rem)] leading-[1.12] font-bold tracking-tight text-balance">
                 {lang === 'vi' ? activeSlide.titleVi : activeSlide.titleEn}
               </h1>
-              <p className="text-sm sm:text-base text-[#F8F5EF]/80 leading-relaxed max-w-xl">
+              <p className="text-xs sm:text-sm text-[#F8F5EF]/80 leading-relaxed max-w-xl line-clamp-3">
                 {lang === 'vi' ? activeSlide.descVi : activeSlide.descEn}
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3.5 pt-1">
+            <div className="flex flex-wrap items-center gap-2.5">
               <Link
                 to={localePath(activeSlide.primaryTo)}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#C6A667] text-[#111111] font-semibold text-sm rounded hover:bg-[#d4b67a] transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#C6A667] text-[#111111] font-semibold text-xs sm:text-sm rounded hover:bg-[#d4b67a] transition-colors whitespace-nowrap"
               >
                 <span>{lang === 'vi' ? activeSlide.primaryCtaVi : activeSlide.primaryCtaEn}</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
               <Link
                 to={localePath(activeSlide.secondaryTo)}
-                className="inline-flex items-center gap-2 px-6 py-3 border border-white/30 text-white font-medium text-sm rounded hover:bg-white/10 transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2 px-5 py-2.5 border border-white/30 text-white font-medium text-xs sm:text-sm rounded hover:bg-white/10 transition-colors whitespace-nowrap"
               >
                 <span>{lang === 'vi' ? activeSlide.secondaryCtaVi : activeSlide.secondaryCtaEn}</span>
               </Link>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 pt-5 border-t border-white/15 text-xs">
-              <div>
-                <span className="font-mono text-lg font-semibold text-[#C6A667] block tabular-nums">7</span>
-                <span className="text-[#F8F5EF]/75">{t('Cá tính thương hiệu', 'Brand Personalities')}</span>
-              </div>
-              <div>
-                <span className="font-mono text-lg font-semibold text-[#C6A667] block tabular-nums">27 SKUs</span>
-                <span className="text-[#F8F5EF]/75">{t('Cấu hình nhân xanh B2B', 'Green Bean Matrix')}</span>
-              </div>
-              <div>
-                <span className="font-mono text-lg font-semibold text-[#C6A667] block tabular-nums">CBU</span>
-                <span className="text-[#F8F5EF]/75">{t('Chuẩn chế biến ướt', 'Washed Designation')}</span>
-              </div>
+            {/* Dynamic Rich Metrics Strip: 7 Personalities · 27+ SKUs · CBU */}
+            <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-white/15">
+              <Link
+                to={localePath('/personalities')}
+                className="group p-2.5 rounded-lg bg-white/5 hover:bg-white/12 border border-white/10 hover:border-[#C6A667]/50 transition-all"
+              >
+                <div className="flex items-baseline justify-between gap-1">
+                  <span className="font-mono text-base sm:text-lg font-bold text-[#C6A667] tabular-nums group-hover:scale-105 transition-transform origin-left">
+                    7
+                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#C6A667] animate-pulse" />
+                </div>
+                <span className="block text-[11px] font-semibold text-white leading-tight mt-0.5">
+                  {t('Cá tính thương hiệu', 'Brand Personalities')}
+                </span>
+                <span className="block text-[10px] text-[#F8F5EF]/70 mt-0.5 truncate transition-opacity duration-500">
+                  {[
+                    t('Hổ · Sư Tử · Cáo · Đại Bàng', 'Tiger · Lion · Fox · Eagle'),
+                    t('Báo Đen · Sói · Cú Mèo', 'Black Panther · Wolf · Owl'),
+                    t('7 câu chuyện gu vị riêng biệt', '7 signature flavor personas'),
+                    t('Phin · Espresso · Signature', 'Phin · Espresso · Signature'),
+                  ][heroIdx % 4]}
+                </span>
+              </Link>
+
+              <Link
+                to={localePath('/coffee/green-beans')}
+                className="group p-2.5 rounded-lg bg-white/5 hover:bg-white/12 border border-white/10 hover:border-[#C6A667]/50 transition-all"
+              >
+                <div className="flex items-baseline justify-between gap-1">
+                  <span className="font-mono text-base sm:text-lg font-bold text-[#C6A667] tabular-nums group-hover:scale-105 transition-transform origin-left">
+                    27+ SKUs
+                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                </div>
+                <span className="block text-[11px] font-semibold text-white leading-tight mt-0.5">
+                  {t('Nhân xanh & Hạt rang', 'Green & Roasted Matrix')}
+                </span>
+                <span className="block text-[10px] text-[#F8F5EF]/70 mt-0.5 truncate transition-opacity duration-500">
+                  {[
+                    t('Robusta · Arabica · Culi S14–S18', 'Robusta · Arabica · Culi S14–S18'),
+                    t('+6 dòng Hạt rang 5 mức giá kg', '+6 Roasted Beans 5-tier kg'),
+                    t('10 vùng trồng cao nguyên VN', '10 Vietnam highland origins'),
+                    t('Sẵn sàng gửi mẫu thử & B2B', 'Sample & B2B export ready'),
+                  ][heroIdx % 4]}
+                </span>
+              </Link>
+
+              <Link
+                to={localePath('/coffee/roasted-beans')}
+                className="group p-2.5 rounded-lg bg-white/5 hover:bg-white/12 border border-white/10 hover:border-[#C6A667]/50 transition-all"
+              >
+                <div className="flex items-baseline justify-between gap-1">
+                  <span className="font-mono text-base sm:text-lg font-bold text-[#C6A667] tabular-nums group-hover:scale-105 transition-transform origin-left">
+                    CBU
+                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" />
+                </div>
+                <span className="block text-[11px] font-semibold text-white leading-tight mt-0.5">
+                  {t('Chuẩn Chế Biến Ướt', 'Washed Designation')}
+                </span>
+                <span className="block text-[10px] text-[#F8F5EF]/70 mt-0.5 truncate transition-opacity duration-500">
+                  {[
+                    t('Full Washed · Honey · Natural', 'Full Washed · Honey · Natural'),
+                    t('Ẩm ≤12.5% · Sàng S18 sạch sâu', 'Moisture ≤12.5% · Clean S18'),
+                    t('Hậu vị ngọt thanh, hương sạch', 'Clean cup & sweet finish'),
+                    t('Chuẩn rang mộc & xuất khẩu', 'Specialty & export grade'),
+                  ][heroIdx % 4]}
+                </span>
+              </Link>
             </div>
           </div>
 
-          <div className="lg:col-span-6 relative min-h-[300px] lg:min-h-[460px] rounded-xl overflow-hidden border border-[#C6A667]/25 bg-black/25">
-            {HERO_SLIDES.map((slide, idx) => (
-              <div
-                key={slide.id}
-                aria-hidden={idx !== heroIdx}
-                className={`absolute inset-0 transition-all duration-700 ease-out ${
-                  idx === heroIdx ? 'opacity-100 scale-100 z-10' : 'opacity-0 scale-[1.04] z-0 pointer-events-none'
-                }`}
-              >
-                <MediaImage
-                  imageKey={slide.imageKey}
-                  alt={lang === 'vi' ? slide.titleVi : slide.titleEn}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            ))}
-            <div className="absolute inset-0 z-20 bg-gradient-to-t from-black/80 via-black/15 to-transparent flex items-end justify-between gap-4 p-5 sm:p-6">
-              <p className="text-xs text-[#F8F5EF]/90 max-w-md">
-                {lang === 'vi' ? activeSlide.captionVi : activeSlide.captionEn}
-              </p>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setUserPaused((p) => !p)}
-                  aria-label={userPaused ? t('Tiếp tục chạy banner', 'Resume carousel') : t('Tạm dừng banner', 'Pause carousel')}
-                  className="w-9 h-9 rounded-full bg-black/55 border border-white/25 text-white flex items-center justify-center hover:bg-[#C6A667] hover:text-[#111111] transition-colors cursor-pointer"
+          {/* Uniform 4:3 Aspect Ratio Hero Media Frame */}
+          <div className="lg:col-span-6 w-full">
+            <div className="relative w-full aspect-[4/3] max-h-[370px] rounded-xl overflow-hidden border border-[#C6A667]/25 bg-black/25">
+              {HERO_SLIDES.map((slide, idx) => (
+                <div
+                  key={slide.id}
+                  aria-hidden={idx !== heroIdx}
+                  className={`absolute inset-0 transition-all duration-700 ease-out ${
+                    idx === heroIdx ? 'opacity-100 scale-100 z-10' : 'opacity-0 scale-[1.03] z-0 pointer-events-none'
+                  }`}
                 >
-                  {userPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHeroIdx((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length)}
-                  aria-label={t('Banner trước', 'Previous banner')}
-                  className="w-9 h-9 rounded-full bg-black/55 border border-white/25 text-white flex items-center justify-center hover:bg-[#C6A667] hover:text-[#111111] transition-colors cursor-pointer"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHeroIdx((prev) => (prev + 1) % HERO_SLIDES.length)}
-                  aria-label={t('Banner tiếp theo', 'Next banner')}
-                  className="w-9 h-9 rounded-full bg-black/55 border border-white/25 text-white flex items-center justify-center hover:bg-[#C6A667] hover:text-[#111111] transition-colors cursor-pointer"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                  <MediaImage
+                    imageKey={slide.imageKey}
+                    alt={lang === 'vi' ? slide.titleVi : slide.titleEn}
+                    className="w-full h-full object-cover object-center"
+                  />
+                </div>
+              ))}
+              <div className="absolute inset-0 z-20 bg-gradient-to-t from-black/80 via-black/10 to-transparent flex items-end justify-between gap-3 p-4">
+                <p className="text-[11px] sm:text-xs text-[#F8F5EF]/90 max-w-md line-clamp-2">
+                  {lang === 'vi' ? activeSlide.captionVi : activeSlide.captionEn}
+                </p>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setUserPaused((p) => !p)}
+                    aria-label={userPaused ? t('Tiếp tục chạy banner', 'Resume carousel') : t('Tạm dừng banner', 'Pause carousel')}
+                    className="w-8 h-8 rounded-full bg-black/55 border border-white/25 text-white flex items-center justify-center hover:bg-[#C6A667] hover:text-[#111111] transition-colors cursor-pointer"
+                  >
+                    {userPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHeroIdx((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length)}
+                    aria-label={t('Banner trước', 'Previous banner')}
+                    className="w-8 h-8 rounded-full bg-black/55 border border-white/25 text-white flex items-center justify-center hover:bg-[#C6A667] hover:text-[#111111] transition-colors cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHeroIdx((prev) => (prev + 1) % HERO_SLIDES.length)}
+                    aria-label={t('Banner tiếp theo', 'Next banner')}
+                    className="w-8 h-8 rounded-full bg-black/55 border border-white/25 text-white flex items-center justify-center hover:bg-[#C6A667] hover:text-[#111111] transition-colors cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Hero Banner Selector Tabs with Dynamic Progress Track */}
+        {/* Compact Hero Banner Selector Tabs with Dynamic Progress Track */}
         <div className="border-t border-white/10 bg-black/15">
-          <div className="max-w-[1280px] mx-auto px-6 py-3 grid grid-cols-2 lg:grid-cols-4 gap-2">
+          <div className="max-w-[1280px] mx-auto px-5 sm:px-6 py-2 grid grid-cols-2 lg:grid-cols-4 gap-2">
             {HERO_SLIDES.map((slide, idx) => {
               const active = idx === heroIdx;
               return (
@@ -310,7 +370,7 @@ export const HomePage: React.FC = () => {
                   key={slide.id}
                   type="button"
                   onClick={() => setHeroIdx(idx)}
-                  className={`relative overflow-hidden text-left px-3.5 py-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                  className={`relative overflow-hidden text-left px-3 py-2 rounded-lg border text-[11px] sm:text-xs transition-all cursor-pointer ${
                     active
                       ? 'bg-[#C6A667] text-[#111111] border-[#C6A667] font-semibold'
                       : 'bg-white/5 text-white/75 border-white/10 hover:bg-white/10 hover:text-white'

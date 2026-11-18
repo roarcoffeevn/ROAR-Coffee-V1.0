@@ -34,6 +34,7 @@ import {
   translateProductViToEn,
 } from './server/gemini.ts';
 import {
+  calculateShippingFee,
   generateEan13Barcode,
   normalizeVolumeTiers,
   resolveVolumeTier,
@@ -820,7 +821,12 @@ app.post('/api/orders', (req: AuthedRequest, res) => {
       }
     }
 
-    const baseShippingFee = subtotal >= 500000 ? 0 : 35000;
+    const shippingRow = db.prepare("SELECT value FROM site_settings WHERE key = 'shipping_rules_json'").get() as
+      | { value: string }
+      | undefined;
+    const baseShippingFee = calculateShippingFee(subtotal, {
+      shipping_rules_json: shippingRow?.value || '',
+    }).feeVnd;
     let shippingFee = baseShippingFee;
     let discountAmount = 0;
     let appliedVoucher = '';
@@ -1856,6 +1862,24 @@ app.patch('/api/admin/b2b/:id', requirePermission('b2b'), (req: AuthedRequest, r
     id
   );
   logAudit(req.authUser!.userId, req.authUser!.email, 'UPDATE_B2B_INQUIRY', 'b2b_inquiry', id, { status });
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/b2b/:id', requirePermission('b2b'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  db.prepare('DELETE FROM b2b_inquiries WHERE id = ?').run(id);
+  logAudit(req.authUser!.userId, req.authUser!.email, 'DELETE_B2B_INQUIRY', 'b2b_inquiry', id, {});
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/newsletter', requirePermission('b2b'), (_req, res) => {
+  res.json({ subscribers: db.prepare('SELECT * FROM newsletter_subscribers ORDER BY id DESC').all() });
+});
+
+app.delete('/api/admin/newsletter/:id', requirePermission('b2b'), (req: AuthedRequest, res) => {
+  const id = Number(req.params.id);
+  db.prepare('DELETE FROM newsletter_subscribers WHERE id = ?').run(id);
+  logAudit(req.authUser!.userId, req.authUser!.email, 'DELETE_NEWSLETTER_SUBSCRIBER', 'newsletter', id, {});
   res.json({ ok: true });
 });
 

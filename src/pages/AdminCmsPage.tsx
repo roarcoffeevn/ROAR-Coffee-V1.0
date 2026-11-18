@@ -51,6 +51,7 @@ import {
   localizeVariantLabel,
 } from '../lib/i18nHelpers';
 import { getRolePreset, hasAdminPermission, type AdminPermission } from '../lib/rbac';
+import { DEFAULT_SHIPPING_RULES, parseShippingRules, type ShippingRuleTier } from '../lib/pricing';
 import { MediaLibrarySection } from '../components/admin/MediaLibrarySection';
 import { MediaPickerModal, type MediaAssetRecord } from '../components/admin/MediaPickerModal';
 import { ProductEditorModal } from '../components/admin/ProductEditorModal';
@@ -122,7 +123,10 @@ export const AdminCmsPage: React.FC = () => {
   const [loyaltySettings, setLoyaltySettings] = useState<any>(null);
   const [promotions, setPromotions] = useState<any[]>([]);
   const [inquiries, setInquiries] = useState<any[]>([]);
+  const [newsletterSubscribers, setNewsletterSubscribers] = useState<any[]>([]);
+  const [b2bSubTab, setB2bSubTab] = useState<'inquiries' | 'newsletter'>('inquiries');
   const [siteSettings, setSiteSettings] = useState<Record<string, string>>({});
+  const [shippingRules, setShippingRules] = useState<ShippingRuleTier[]>(DEFAULT_SHIPPING_RULES);
   const [teamAdmins, setTeamAdmins] = useState<AdminTeamMember[]>([]);
   const [teamNonAdmins, setTeamNonAdmins] = useState<NonAdminCandidate[]>([]);
   const [teamAuditLogs, setTeamAuditLogs] = useState<any[]>([]);
@@ -219,7 +223,7 @@ export const AdminCmsPage: React.FC = () => {
   const loadAll = async () => {
     if (!isAdmin) return;
     try {
-      const [ov, pg, pr, ar, md, or, cu, pm, b2, st, tm] = await Promise.all([
+      const [ov, pg, pr, ar, md, or, cu, pm, b2, nl, st, tm] = await Promise.all([
         hasAdminPermission(user, 'overview') ? apiFetch('/api/admin/overview').then((r) => (r.ok ? r.json() : null)) : Promise.resolve(null),
         hasAdminPermission(user, 'pages') ? apiFetch('/api/admin/pages').then((r) => (r.ok ? r.json() : { pages: [] })) : Promise.resolve({ pages: [] }),
         hasAdminPermission(user, 'products') ? apiFetch('/api/admin/products').then((r) => (r.ok ? r.json() : { products: [] })) : Promise.resolve({ products: [] }),
@@ -229,6 +233,7 @@ export const AdminCmsPage: React.FC = () => {
         hasAdminPermission(user, 'customers') ? apiFetch('/api/admin/customers').then((r) => (r.ok ? r.json() : { customers: [] })) : Promise.resolve({ customers: [] }),
         hasAdminPermission(user, 'promotions') ? apiFetch('/api/admin/promotions').then((r) => (r.ok ? r.json() : { promotions: [] })) : Promise.resolve({ promotions: [] }),
         hasAdminPermission(user, 'b2b') ? apiFetch('/api/admin/b2b').then((r) => (r.ok ? r.json() : { inquiries: [] })) : Promise.resolve({ inquiries: [] }),
+        hasAdminPermission(user, 'b2b') ? apiFetch('/api/admin/newsletter').then((r) => (r.ok ? r.json() : { subscribers: [] })) : Promise.resolve({ subscribers: [] }),
         hasAdminPermission(user, 'settings') ? apiFetch('/api/admin/settings').then((r) => (r.ok ? r.json() : { settings: {} })) : Promise.resolve({ settings: {} }),
         hasAdminPermission(user, 'team')
           ? apiFetch('/api/admin/team').then((r) => (r.ok ? r.json() : { admins: [], nonAdmins: [], auditLogs: [] }))
@@ -244,7 +249,10 @@ export const AdminCmsPage: React.FC = () => {
       setLoyaltySettings(cu.loyaltySettings || null);
       setPromotions(pm.promotions || []);
       setInquiries(b2.inquiries || []);
-      setSiteSettings(st.settings || {});
+      setNewsletterSubscribers(nl.subscribers || []);
+      const loadedSettings = st.settings || {};
+      setSiteSettings(loadedSettings);
+      setShippingRules(parseShippingRules(loadedSettings.shipping_rules_json));
       setTeamAdmins(tm.admins || []);
       setTeamNonAdmins(tm.nonAdmins || []);
       setTeamAuditLogs(tm.auditLogs || []);
@@ -268,13 +276,12 @@ export const AdminCmsPage: React.FC = () => {
     setLoginError('');
     setLoggingIn(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      const d = await res.json();
+      const d = await res.json().catch(() => ({}));
       if (res.ok && d.user) {
         setAuthSession(d.user, d.token);
         if (d.user.role !== 'admin') {
@@ -784,7 +791,12 @@ export const AdminCmsPage: React.FC = () => {
     {
       groupLabel: t('Đối tác & Hệ thống', 'Partners & System'),
       items: [
-        { id: 'b2b', label: t('Yêu cầu B2B', 'B2B Inquiries'), icon: <Briefcase className="w-4 h-4" />, count: inquiries.length },
+        {
+          id: 'b2b',
+          label: t('Yêu cầu B2B & Newsletter', 'B2B & Newsletter'),
+          icon: <Briefcase className="w-4 h-4" />,
+          count: inquiries.length + newsletterSubscribers.length,
+        },
         { id: 'brand', label: t('Linh vật & Vùng trồng', 'Mascots & Origins'), icon: <Compass className="w-4 h-4" /> },
         { id: 'settings', label: t('Cài đặt Website', 'Site Settings'), icon: <Settings className="w-4 h-4" /> },
         {
@@ -2180,76 +2192,182 @@ export const AdminCmsPage: React.FC = () => {
             </div>
           )}
 
-          {/* 8. B2B INQUIRIES (ĐỐI TÁC B2B) */}
+          {/* 8. B2B INQUIRIES & NEWSLETTER SUBSCRIBERS (YÊU CẦU & NEWSLETTER) */}
           {resolvedSection === 'b2b' && hasAdminPermission(user, 'b2b') && (
-            <>
-              <div className="md:hidden bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
-                {inquiries.map((inq) => (
-                  <div key={inq.id} className="p-3 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-bold text-slate-900 truncate">{inq.company_name || inq.contact_name}</p>
-                        <p className="text-[11px] text-[#00552B] font-medium">{localizeB2BType(inq.inquiry_type, lang)}</p>
-                        <p className="text-[11px] text-slate-500 truncate">{inq.email} · {inq.phone}</p>
-                      </div>
-                      <select
-                        value={inq.status}
-                        onChange={(e) => updateB2b(inq.id, e.target.value, inq.quoted_price || '')}
-                        className="border border-slate-200 rounded px-2 py-1 bg-white text-[11px] shrink-0"
-                      >
-                        {Object.entries(B2B_STATUS_VI).map(([val, labelVi]) => (
-                          <option key={val} value={val}>
-                            {lang === 'en' ? val : labelVi}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <p className="text-[11px] font-mono text-slate-600">{inq.product_sku || '—'} · {inq.estimated_volume || '—'}</p>
-                    {inq.message && <p className="text-[11px] text-slate-600 line-clamp-2">{inq.message}</p>}
-                  </div>
-                ))}
+            <div className="space-y-4">
+              {/* Sub-tabs */}
+              <div className="bg-white p-2 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setB2bSubTab('inquiries')}
+                    className={`px-3.5 py-2 rounded-lg font-semibold cursor-pointer ${
+                      b2bSubTab === 'inquiries' ? 'bg-[#00552B] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {t('Yêu cầu B2B & Liên hệ', 'B2B Inquiries')} ({inquiries.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setB2bSubTab('newsletter')}
+                    className={`px-3.5 py-2 rounded-lg font-semibold cursor-pointer ${
+                      b2bSubTab === 'newsletter' ? 'bg-[#00552B] text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {t('Đăng ký nhận tin (Newsletter)', 'Newsletter Subscribers')} ({newsletterSubscribers.length})
+                  </button>
+                </div>
+
+                {b2bSubTab === 'newsletter' && newsletterSubscribers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(newsletterSubscribers.map((n) => n.email).join(', '));
+                      showToast(t(`Đã sao chép ${newsletterSubscribers.length} email Newsletter`, `Copied ${newsletterSubscribers.length} emails`));
+                    }}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-[#00552B] font-semibold text-slate-700 cursor-pointer"
+                  >
+                    {t('Sao chép tất cả Email', 'Copy All Emails')}
+                  </button>
+                )}
               </div>
 
-              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                    <tr>
-                      <th className="p-3 text-left">{t('Loại yêu cầu', 'Inquiry Type')}</th>
-                      <th className="p-3 text-left">{t('Doanh nghiệp / Liên hệ', 'Company / Contact')}</th>
-                      <th className="p-3 text-left">{t('Sản phẩm / Sản lượng', 'SKU / Volume')}</th>
-                      <th className="p-3 text-left">{t('Nội dung yêu cầu', 'Message')}</th>
-                      <th className="p-3 text-left">{t('Trạng thái xử lý', 'Status')}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {inquiries.map((inq) => (
-                      <tr key={inq.id}>
-                        <td className="p-3 font-medium">{localizeB2BType(inq.inquiry_type, lang)}</td>
-                        <td className="p-3">
-                          <div className="font-semibold text-slate-900">{inq.company_name || inq.contact_name}</div>
-                          <div className="text-slate-500">{inq.email} · {inq.phone}</div>
-                        </td>
-                        <td className="p-3 font-mono">{inq.product_sku || '—'} · {inq.estimated_volume || '—'}</td>
-                        <td className="p-3 max-w-xs truncate">{inq.message}</td>
-                        <td className="p-3">
-                          <select
-                            value={inq.status}
-                            onChange={(e) => updateB2b(inq.id, e.target.value, inq.quoted_price || '')}
-                            className="border border-slate-200 rounded px-2 py-1 bg-white"
-                          >
-                            {Object.entries(B2B_STATUS_VI).map(([val, labelVi]) => (
-                              <option key={val} value={val}>
-                                {lang === 'en' ? val : labelVi}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
+              {b2bSubTab === 'inquiries' ? (
+                inquiries.length === 0 ? (
+                  <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-xs text-slate-500">
+                    {t('Chưa có yêu cầu B2B hoặc liên hệ hợp tác nào.', 'No B2B inquiries received yet.')}
+                  </div>
+                ) : (
+                  <>
+                    <div className="md:hidden bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
+                      {inquiries.map((inq) => (
+                        <div key={inq.id} className="p-3 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-900 truncate">{inq.company_name || inq.contact_name}</p>
+                              <p className="text-[11px] text-[#00552B] font-medium">{localizeB2BType(inq.inquiry_type, lang)}</p>
+                              <p className="text-[11px] text-slate-500 truncate">{inq.email} · {inq.phone}</p>
+                            </div>
+                            <select
+                              value={inq.status}
+                              onChange={(e) => updateB2b(inq.id, e.target.value, inq.quoted_price || '')}
+                              className="border border-slate-200 rounded px-2 py-1 bg-white text-[11px] shrink-0"
+                            >
+                              {Object.entries(B2B_STATUS_VI).map(([val, labelVi]) => (
+                                <option key={val} value={val}>
+                                  {lang === 'en' ? val : labelVi}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <p className="text-[11px] font-mono text-slate-600">{inq.product_sku || '—'} · {inq.estimated_volume || '—'}</p>
+                          {inq.message && <p className="text-[11px] text-slate-600 line-clamp-2">{inq.message}</p>}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                          <tr>
+                            <th className="p-3 text-left">{t('Loại yêu cầu', 'Inquiry Type')}</th>
+                            <th className="p-3 text-left">{t('Doanh nghiệp / Liên hệ', 'Company / Contact')}</th>
+                            <th className="p-3 text-left">{t('Sản phẩm / Sản lượng', 'SKU / Volume')}</th>
+                            <th className="p-3 text-left">{t('Nội dung yêu cầu', 'Message')}</th>
+                            <th className="p-3 text-left">{t('Trạng thái xử lý', 'Status')}</th>
+                            <th className="p-3 text-right">{t('Xóa', 'Delete')}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {inquiries.map((inq) => (
+                            <tr key={inq.id}>
+                              <td className="p-3 font-medium">{localizeB2BType(inq.inquiry_type, lang)}</td>
+                              <td className="p-3">
+                                <div className="font-semibold text-slate-900">{inq.company_name || inq.contact_name}</div>
+                                <div className="text-slate-500">{inq.email} · {inq.phone}</div>
+                              </td>
+                              <td className="p-3 font-mono">{inq.product_sku || '—'} · {inq.estimated_volume || '—'}</td>
+                              <td className="p-3 max-w-xs truncate">{inq.message}</td>
+                              <td className="p-3">
+                                <select
+                                  value={inq.status}
+                                  onChange={(e) => updateB2b(inq.id, e.target.value, inq.quoted_price || '')}
+                                  className="border border-slate-200 rounded px-2 py-1 bg-white"
+                                >
+                                  {Object.entries(B2B_STATUS_VI).map(([val, labelVi]) => (
+                                    <option key={val} value={val}>
+                                      {lang === 'en' ? val : labelVi}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const res = await apiFetch(`/api/admin/b2b/${inq.id}`, { method: 'DELETE' });
+                                    if (res.ok) {
+                                      showToast(t('Đã xóa yêu cầu B2B', 'Deleted B2B inquiry'));
+                                      loadAll();
+                                    }
+                                  }}
+                                  className="p-1.5 text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                                  title={t('Xóa yêu cầu', 'Delete inquiry')}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )
+              ) : newsletterSubscribers.length === 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-xs text-slate-500">
+                  {t('Chưa có khách hàng nào đăng ký nhận bản tin (Newsletter).', 'No newsletter subscribers yet.')}
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                      <tr>
+                        <th className="p-3 text-left">Email</th>
+                        <th className="p-3 text-left">{t('Ngôn ngữ', 'Language')}</th>
+                        <th className="p-3 text-left">{t('Ngày đăng ký', 'Subscribed At')}</th>
+                        <th className="p-3 text-right">{t('Xóa', 'Delete')}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {newsletterSubscribers.map((sub) => (
+                        <tr key={sub.id}>
+                          <td className="p-3 font-mono font-semibold text-slate-900">{sub.email}</td>
+                          <td className="p-3 uppercase font-mono text-slate-600">{sub.lang || 'vi'}</td>
+                          <td className="p-3 text-slate-500 tabular-nums">{String(sub.created_at || '').slice(0, 16)}</td>
+                          <td className="p-3 text-right">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const res = await apiFetch(`/api/admin/newsletter/${sub.id}`, { method: 'DELETE' });
+                                if (res.ok) {
+                                  showToast(t('Đã xóa email khỏi danh sách Newsletter', 'Removed newsletter subscriber'));
+                                  loadAll();
+                                }
+                              }}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                              title={t('Xóa email', 'Remove subscriber')}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
 
           {/* 9. BRAND PERSONALITIES & ORIGINS */}
@@ -2390,6 +2508,136 @@ export const AdminCmsPage: React.FC = () => {
                       onChange={(e) => setSiteSettings({ ...siteSettings, office_address_en: e.target.value })}
                       className="w-full border border-slate-200 rounded-lg px-3 py-2"
                     />
+                  </div>
+                </div>
+
+                {/* Dynamic Order-Total Shipping Rules Setup */}
+                <div className="pt-4 border-t border-slate-200 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        {t('Cấu hình Phí vận chuyển theo Tổng tiền đơn hàng', 'Shipping Fee Rules by Order Total')}
+                      </h3>
+                      <p className="text-slate-500 text-[11px] mt-0.5">
+                        {t(
+                          'Tùy biến phí giao hàng tự động áp dụng tại Giỏ hàng & Thanh toán theo giá trị đơn hàng (VND). Để trống "Đến mức" cho bậc cao nhất.',
+                          'Customize shipping fees automatically applied at Cart & Checkout based on order subtotal (VND). Leave Max blank for top tier.'
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = [
+                          ...shippingRules,
+                          { minSubtotal: 0, maxSubtotal: null, feeVnd: 0, labelVi: 'Bậc vận chuyển mới', labelEn: 'New shipping tier' },
+                        ];
+                        setShippingRules(next);
+                        setSiteSettings({ ...siteSettings, shipping_rules_json: JSON.stringify(next) });
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {t('Thêm bậc phí ship', 'Add Tier')}
+                    </button>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                        <tr>
+                          <th className="p-2 text-left">{t('Từ tổng tiền (₫)', 'Min Subtotal (₫)')}</th>
+                          <th className="p-2 text-left">{t('Đến mức (₫)', 'Max Subtotal (₫)')}</th>
+                          <th className="p-2 text-left">{t('Phí ship (₫)', 'Shipping Fee (₫)')}</th>
+                          <th className="p-2 text-left">{t('Mô tả hiển thị', 'Label')}</th>
+                          <th className="p-2 text-right">{t('Xóa', 'Del')}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {shippingRules.map((rule, idx) => (
+                          <tr key={idx}>
+                            <td className="p-2">
+                              <input
+                                type="number"
+                                min={0}
+                                step={10000}
+                                value={rule.minSubtotal}
+                                onChange={(e) => {
+                                  const next = shippingRules.map((r, i) =>
+                                    i === idx ? { ...r, minSubtotal: Math.max(0, Number(e.target.value)) } : r
+                                  );
+                                  setShippingRules(next);
+                                  setSiteSettings({ ...siteSettings, shipping_rules_json: JSON.stringify(next) });
+                                }}
+                                className="w-28 border border-slate-200 rounded px-2 py-1 font-mono tabular-nums"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="number"
+                                min={0}
+                                step={10000}
+                                value={rule.maxSubtotal ?? ''}
+                                placeholder={t('Không giới hạn', 'No limit')}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const next = shippingRules.map((r, i) =>
+                                    i === idx ? { ...r, maxSubtotal: raw === '' ? null : Math.max(0, Number(raw)) } : r
+                                  );
+                                  setShippingRules(next);
+                                  setSiteSettings({ ...siteSettings, shipping_rules_json: JSON.stringify(next) });
+                                }}
+                                className="w-28 border border-slate-200 rounded px-2 py-1 font-mono tabular-nums"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="number"
+                                min={0}
+                                step={5000}
+                                value={rule.feeVnd}
+                                onChange={(e) => {
+                                  const next = shippingRules.map((r, i) =>
+                                    i === idx ? { ...r, feeVnd: Math.max(0, Number(e.target.value)) } : r
+                                  );
+                                  setShippingRules(next);
+                                  setSiteSettings({ ...siteSettings, shipping_rules_json: JSON.stringify(next) });
+                                }}
+                                className="w-24 border border-slate-200 rounded px-2 py-1 font-mono tabular-nums font-semibold text-[#00552B]"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={rule.labelVi}
+                                onChange={(e) => {
+                                  const next = shippingRules.map((r, i) =>
+                                    i === idx ? { ...r, labelVi: e.target.value, labelEn: e.target.value } : r
+                                  );
+                                  setShippingRules(next);
+                                  setSiteSettings({ ...siteSettings, shipping_rules_json: JSON.stringify(next) });
+                                }}
+                                className="w-full min-w-[140px] border border-slate-200 rounded px-2 py-1"
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <button
+                                type="button"
+                                disabled={shippingRules.length <= 1}
+                                onClick={() => {
+                                  const next = shippingRules.filter((_, i) => i !== idx);
+                                  setShippingRules(next);
+                                  setSiteSettings({ ...siteSettings, shipping_rules_json: JSON.stringify(next) });
+                                }}
+                                className="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer disabled:opacity-30"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
