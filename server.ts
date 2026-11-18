@@ -30,6 +30,7 @@ import {
   type VcbRateMode,
 } from './server/vietcombank.ts';
 import {
+  chatWithRoarBarista,
   GeminiTranslationError,
   translateProductViToEn,
 } from './server/gemini.ts';
@@ -322,6 +323,289 @@ app.post('/api/auth/login', (req, res) => {
       b2bVerified: Boolean(user.b2b_verified),
     },
   });
+});
+
+app.post('/api/auth/social', (req, res) => {
+  const { provider, email, fullName } = req.body || {};
+  const cleanProvider = String(provider || 'google').toLowerCase();
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const cleanName = String(fullName || '').trim() || (normalizedEmail ? normalizedEmail.split('@')[0] : 'ROAR Member');
+
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    res.status(400).json({ error: 'Vui lòng cung cấp email tài khoản hợp lệ.' });
+    return;
+  }
+
+  let user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail) as any;
+  if (!user) {
+    const memberCode = `RC-MEM-${Math.floor(100000 + Math.random() * 900000)}`;
+    const randomPass = crypto.randomBytes(16).toString('hex');
+    const result = db
+      .prepare(`
+        INSERT INTO users (email, password_hash, full_name, phone, role, member_code, tier, email_verified)
+        VALUES (?, ?, ?, '', 'customer', ?, 'ROAR Member', 1)
+      `)
+      .run(normalizedEmail, hashPassword(randomPass), cleanName, memberCode);
+    const newId = Number(result.lastInsertRowid);
+    db.prepare(`
+      INSERT INTO points_ledger (user_id, entry_type, points, description_vi, description_en)
+      VALUES (?, 'earn_available', 50, ?, ?)
+    `).run(
+      newId,
+      `Quà chào mừng đăng ký qua ${cleanProvider.toUpperCase()}`,
+      `Welcome bonus via ${cleanProvider.toUpperCase()} sign-in`
+    );
+    createUserNotification(newId, {
+      titleVi: `Chào mừng ${cleanName} gia nhập ROAR COFFEE®`,
+      titleEn: `Welcome ${cleanName} to ROAR COFFEE®`,
+      messageVi: `Tài khoản liên kết ${cleanProvider.toUpperCase()} đã được kích hoạt kèm 50 điểm thưởng chào mừng.`,
+      messageEn: `Your ${cleanProvider.toUpperCase()} account is active with 50 welcome reward points.`,
+      category: 'loyalty',
+      linkUrl: '/account?tab=rewards',
+    });
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(newId) as any;
+  }
+
+  const token = signSessionToken({ userId: user.id, email: user.email, role: user.role });
+  setSessionCookie(req, res, token);
+  const rbac = resolveEffectiveAdminPermissions(user);
+
+  res.json({
+    ok: true,
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      phone: user.phone,
+      role: user.role,
+      adminRole: rbac.adminRole,
+      adminPermissions: rbac.adminPermissions,
+      memberCode: user.member_code,
+      tier: user.tier,
+      emailVerified: Boolean(user.email_verified),
+      companyName: user.company_name,
+      b2bVerified: Boolean(user.b2b_verified),
+    },
+  });
+});
+
+app.post('/api/ai/chat', async (req, res) => {
+  const { message, history = [], lang = 'vi' } = req.body || {};
+  const cleanMsg = String(message || '').trim();
+  if (!cleanMsg) {
+    res.status(400).json({ error: 'Message is required' });
+    return;
+  }
+
+  const allProducts = db
+    .prepare(
+      "SELECT id, slug, sku, sub_category, category, name_vi, name_en, price_vnd, price_usd, image_key, tasting_notes_vi, tasting_notes_en, roast_profile_vi, pricing_tiers_json, variants_json FROM products WHERE status != 'draft'"
+    )
+    .all() as any[];
+
+  const hydrateProductCard = (p: any) => ({
+    id: p.id,
+    slug: p.slug,
+    sku: p.sku,
+    sub_category: p.sub_category || '',
+    category: p.category,
+    name_vi: p.name_vi,
+    name_en: p.name_en,
+    price_vnd: p.price_vnd,
+    price_usd: p.price_usd,
+    image_key: p.image_key,
+    tasting_notes_vi: p.tasting_notes_vi || '',
+    tasting_notes_en: p.tasting_notes_en || '',
+    pricing_tiers: JSON.parse(p.pricing_tiers_json || '[]'),
+    variants: JSON.parse(p.variants_json || '[]'),
+    to: `/product/${p.slug}`,
+  });
+
+  const activePromos = db
+    .prepare("SELECT code, title_vi, discount_type, discount_value, min_order_value FROM promotions WHERE active = 1 LIMIT 6")
+    .all() as any[];
+
+  const catalogLines = allProducts
+    .filter((p) => p.category !== 'green_bean')
+    .map((p) => {
+      const tiers = JSON.parse(p.pricing_tiers_json || '[]');
+      const tierStr =
+        Array.isArray(tiers) && tiers.length > 0
+          ? ` | 5-tier kg: ${tiers.map((t: any) => `${t.labelVi}=${Number(t.priceVnd).toLocaleString('vi-VN')}₫/kg`).join(', ')}`
+          : ` | ${Number(p.price_vnd || 0).toLocaleString('vi-VN')}₫`;
+      return `- slug="${p.slug}" | ${p.sku}${p.sub_category ? ` (${p.sub_category})` : ''} | ${p.name_vi} [${p.category}]${tierStr} | Gu vị: ${p.tasting_notes_vi || p.roast_profile_vi}`;
+    })
+    .join('\n');
+
+  const siteRows = db.prepare('SELECT key, value FROM site_settings').all() as Array<{ key: string; value: string }>;
+  const siteMap: Record<string, string> = {};
+  for (const r of siteRows) siteMap[r.key] = r.value;
+
+  const hotline = siteMap.hotline || siteMap.contact_phone || '0901234567';
+  const zaloPhone = siteMap.zalo_phone || hotline;
+  const contactEmail = siteMap.contact_email || 'hello@roarcoffee.vn';
+  const b2bEmail = siteMap.b2b_email || 'b2b@roarcoffee.vn';
+  const addressVi = siteMap.office_address_vi || 'TP. Hồ Chí Minh & Xưởng rang Tây Nguyên (Đắk Lắk / Lâm Đồng), Việt Nam';
+  const addressEn = siteMap.office_address_en || 'Ho Chi Minh City & Central Highlands Roastery (Dak Lak / Lam Dong), Vietnam';
+  const openHoursVi = '08:00 – 17:30 (Thứ 2 – Thứ 7, nghỉ Chủ nhật & ngày lễ). Tư vấn Zalo & AI Barista hỗ trợ 24/7.';
+  const openHoursEn = '08:00 – 17:30 (Monday – Saturday, closed Sunday & public holidays). Zalo & AI Barista available 24/7.';
+
+  const promoLines = activePromos
+    .map((pr) => `- Voucher ${pr.code}: ${pr.title_vi} (tối thiểu ${Number(pr.min_order_value || 0).toLocaleString('vi-VN')}₫)`)
+    .join('\n');
+
+  const catalogSummary =
+    `Store & Brand Information:\n` +
+    `- Brand: ROAR COFFEE® Vietnam — Specialty & Commercial Coffee Roaster + B2B Green Coffee Supplier.\n` +
+    `- Operating Hours: ${openHoursVi}\n` +
+    `- Hotline: ${hotline} | Zalo: ${zaloPhone} | Retail Email: ${contactEmail} | B2B Email: ${b2bEmail}\n` +
+    `- Address: ${addressVi}\n` +
+    `- Growing Regions (/regions): Cầu Đất (Đà Lạt, 1500m+ Arabica), Buôn Ma Thuột / Đắk Lắk (Fine Robusta), Gia Lai, Kon Tum, Lâm Đồng.\n` +
+    `- Shipping Policy: Giao hàng toàn quốc 1–3 ngày (nội thành HCM 2–4h), miễn phí vận chuyển theo mốc đơn hàng cấu hình tại trang Thanh toán (/checkout).\n` +
+    `- Order Tracking (/orders/track): Tra cứu bằng 1 trong 3 thông tin: Mã đơn hàng, Số điện thoại hoặc Email.\n` +
+    `- B2B / HORECA / OEM (/partners, /coffee/green-beans): 27 mã Nhân xanh (Robusta/Arabica/Culi × S14/S16/S18 × Natural/Honey/CBU Washed), rang gia công OEM, mẫu thử COA.\n\n` +
+    `Products:\n${catalogLines}\n\nActive Vouchers:\n${promoLines}`;
+
+  try {
+    const aiResult = await chatWithRoarBarista({
+      message: cleanMsg,
+      history: Array.isArray(history) ? history : [],
+      lang: lang === 'en' ? 'en' : 'vi',
+      catalogSummary,
+    });
+
+    const recommendedProducts = aiResult.recommendedSlugs
+      .map((slug) => allProducts.find((p) => p.slug === slug))
+      .filter(Boolean)
+      .map(hydrateProductCard);
+
+    res.json({
+      ok: true,
+      reply: aiResult.reply,
+      recommendedProducts,
+      quickLinks: aiResult.quickLinks,
+    });
+  } catch {
+    const q = cleanMsg.toLowerCase();
+    const isEn = lang === 'en';
+    const kgMatch = q.match(/(\d+)\s*kg/);
+    const requestedKg = kgMatch ? Math.max(1, Number(kgMatch[1])) : null;
+
+    let matched: any[] = [];
+    let quickLinks: Array<{ label: string; to: string }> = [];
+    let reply = '';
+
+    if (q.includes('giờ') || q.includes('mở cửa') || q.includes('làm việc') || q.includes('mấy giờ') || q.includes('hour') || q.includes('open') || q.includes('time')) {
+      const nowStr = new Date().toLocaleTimeString(isEn ? 'en-US' : 'vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
+      reply = isEn
+        ? `ROAR COFFEE® Operating Hours:\n• Office & Roastery: ${openHoursEn}\n• Current Vietnam time: ${nowStr}\n• Hotline: ${hotline} | Zalo: ${zaloPhone}`
+        : `Giờ làm việc của ROAR COFFEE®:\n• Văn phòng & Xưởng rang: ${openHoursVi}\n• Giờ Việt Nam hiện tại: ${nowStr}\n• Hotline: ${hotline} | Zalo: ${zaloPhone}`;
+      quickLinks = [{ label: isEn ? 'Contact Us' : 'Trang Liên hệ', to: '/contact' }];
+    } else if (q.includes('địa chỉ') || q.includes('ở đâu') || q.includes('liên hệ') || q.includes('hotline') || q.includes('zalo') || q.includes('điện thoại') || q.includes('sđt') || q.includes('email') || q.includes('address') || q.includes('contact') || q.includes('phone')) {
+      reply = isEn
+        ? `ROAR COFFEE® Contact Information:\n• Hotline: ${hotline}\n• Zalo: ${zaloPhone}\n• Support Email: ${contactEmail}\n• B2B / Export Email: ${b2bEmail}\n• Address: ${addressEn}\n• Hours: ${openHoursEn}`
+        : `Thông tin liên hệ ROAR COFFEE®:\n• Hotline: ${hotline}\n• Zalo: ${zaloPhone}\n• Email CSKH: ${contactEmail}\n• Email B2B / Xuất khẩu: ${b2bEmail}\n• Địa chỉ: ${addressVi}\n• Giờ làm việc: ${openHoursVi}`;
+      quickLinks = [{ label: isEn ? 'Contact Page' : 'Xem trang Liên hệ', to: '/contact' }];
+    } else if (q.includes('ship') || q.includes('vận chuyển') || q.includes('giao hàng') || q.includes('delivery') || q.includes('shipping')) {
+      reply = isEn
+        ? 'ROAR COFFEE® Shipping Policy:\n• Nationwide delivery in 1–3 business days (2–4h express in HCMC).\n• Shipping fees and free-shipping thresholds are automatically calculated at Checkout based on your order total.'
+        : 'Chính sách giao hàng ROAR COFFEE®:\n• Giao hàng toàn quốc 1–3 ngày làm việc (nội thành TP.HCM giao nhanh 2–4 giờ).\n• Phí vận chuyển và mức Freeship được tính tự động theo tổng giá trị đơn hàng ngay tại bước Thanh toán.';
+      quickLinks = [{ label: isEn ? 'Track Order' : 'Tra cứu đơn hàng', to: '/orders/track' }];
+    } else if (q.includes('đơn hàng') || q.includes('tra cứu') || q.includes('kiểm tra đơn') || q.includes('track') || q.includes('order')) {
+      reply = isEn
+        ? 'You can track your ROAR COFFEE® order anytime using any of 3 options: Order Code, Phone Number, or Email address.'
+        : 'Bạn có thể tra cứu trạng thái đơn hàng ROAR COFFEE® bất cứ lúc nào bằng 1 trong 3 thông tin: Mã đơn hàng, Số điện thoại hoặc Email đặt hàng.';
+      quickLinks = [{ label: isEn ? 'Track Order Now' : 'Tra cứu đơn hàng ngay', to: '/orders/track' }];
+    } else if (q.includes('voucher') || q.includes('mã giảm') || q.includes('khuyến mãi') || q.includes('ưu đãi') || q.includes('promo') || q.includes('discount')) {
+      reply = isEn
+        ? `Active ROAR COFFEE® Vouchers:\n${promoLines || 'Check our Promotions page for the latest offers!'}\nYou can pick or enter vouchers directly at Checkout.`
+        : `Các mã Voucher ưu đãi đang áp dụng tại ROAR COFFEE®:\n${promoLines || 'Mời bạn xem trang Khuyến mãi để nhận ưu đãi mới nhất!'}\nBạn có thể chọn trực tiếp hoặc nhập mã ngay tại bước Thanh toán.`;
+      quickLinks = [{ label: isEn ? 'View Promotions' : 'Xem tất cả Khuyến mãi', to: '/promotions' }];
+    } else if (q.includes('vùng trồng') || q.includes('nguồn gốc') || q.includes('cầu đất') || q.includes('đắk lắk') || q.includes('tây nguyên') || q.includes('thương hiệu') || q.includes('giới thiệu') || q.includes('origin') || q.includes('story') || q.includes('about')) {
+      reply = isEn
+        ? 'ROAR COFFEE® sources directly from Vietnam’s finest highlands: Cầu Đất (Đà Lạt, 1,500m+ Arabica), Buôn Ma Thuột / Đắk Lắk (Fine Robusta), Gia Lai, and Kon Tum — roasted fresh to express 7 distinct Brand Personalities.'
+        : 'ROAR COFFEE® tuyển chọn trực tiếp từ các vùng nguyên liệu trứ danh Việt Nam: Cầu Đất (Đà Lạt 1.500m+ cho Arabica), Buôn Ma Thuột / Đắk Lắk (Fine Robusta), Gia Lai & Kon Tum — rang mới mỗi mẻ theo 7 Cá tính thương hiệu riêng biệt.';
+      quickLinks = [
+        { label: isEn ? 'Growing Regions' : 'Khám phá Vùng trồng', to: '/regions' },
+        { label: isEn ? 'Brand Story' : 'Câu chuyện ROAR', to: '/about' },
+      ];
+    } else if (q.includes('cách pha') || q.includes('pha chế') || q.includes('nhiệt độ') || q.includes('tỉ lệ') || q.includes('brew') || q.includes('recipe')) {
+      reply = isEn
+        ? 'ROAR Brewing Tips:\n• Vietnamese Phin: 25g coffee + 25ml bloom (30s) + 65ml water at 92–95°C.\n• Espresso: 18g in → 36g out in 27–30s at 93°C.\n• Pour Over (V60): 15g coffee + 240ml water at 91–93°C (2m30s).'
+        : 'Gợi ý pha chế chuẩn vị ROAR COFFEE®:\n• Pha Phin: 25g cà phê, ủ 25ml nước (30s), rót thêm 65ml nước 92–95°C.\n• Pha Espresso: 18g bột → chiết xuất 36g trong 27–30 giây ở 93°C.\n• Pour Over (V60): 15g cà phê + 240ml nước 91–93°C (khoảng 2 phút 30 giây).';
+      quickLinks = [{ label: isEn ? 'Full Brewing Guide' : 'Xem Cẩm nang pha chế', to: '/brewing' }];
+    } else if (q.includes('b2b') || q.includes('nhân xanh') || q.includes('đại lý') || q.includes('oem') || q.includes('xuất khẩu') || q.includes('hợp tác') || q.includes('partner') || q.includes('export')) {
+      reply = isEn
+        ? `ROAR COFFEE® B2B & Export:\n• 27 Green Coffee SKUs (Robusta/Arabica/Culi × S14/S16/S18 × Natural/Honey/CBU Washed) with COA.\n• Private-label OEM roasting & HORECA wholesale supply.\n• Direct B2B contact: ${b2bEmail} | Hotline/Zalo: ${hotline}`
+        : `Hợp tác B2B, Đại lý & Xuất khẩu ROAR COFFEE®:\n• 27 mã Cà phê Nhân xanh chuẩn xuất khẩu (Robusta/Arabica/Culi × S14/S16/S18 × Natural/Honey/CBU Washed) đầy đủ COA.\n• Nhận rang gia công OEM & cung ứng sỉ cho chuỗi quán HORECA.\n• Liên hệ B2B: ${b2bEmail} | Hotline/Zalo: ${hotline}`;
+      quickLinks = [
+        { label: isEn ? '27 Green Coffee SKUs' : '27 mã Nhân xanh B2B', to: '/coffee/green-beans' },
+        { label: isEn ? 'B2B Partnership' : 'Đăng ký Đối tác B2B', to: '/partners' },
+      ];
+    } else if (q.includes('kg') || q.includes('sỉ') || q.includes('hạt rang') || q.includes('s18') || q.includes('báo giá') || q.includes('wholesale')) {
+      const beans = allProducts.filter((p) => p.category === 'roasted_beans');
+      matched = beans.filter((p) => {
+        if (q.includes('arabica')) return p.name_vi.toLowerCase().includes('arabica');
+        if (q.includes('culi')) return p.name_vi.toLowerCase().includes('culi');
+        if (q.includes('honey')) return p.name_vi.toLowerCase().includes('honey');
+        if (q.includes('cbu')) return p.name_vi.toLowerCase().includes('cbu');
+        if (q.includes('robusta')) return p.name_vi.toLowerCase().includes('robusta');
+        return true;
+      });
+      if (matched.length === 0) matched = beans;
+      const top = matched.slice(0, 3);
+      if (requestedKg) {
+        const quoteLines = top
+          .map((p) => {
+            const tiers = JSON.parse(p.pricing_tiers_json || '[]');
+            const tier = resolveVolumeTier(tiers, requestedKg);
+            const unitP = tier ? tier.priceVnd : p.price_vnd;
+            return `• ${p.name_vi} (${p.sub_category}): ${unitP.toLocaleString('vi-VN')} ₫/kg → ${requestedKg} kg = ${(unitP * requestedKg).toLocaleString('vi-VN')} ₫`;
+          })
+          .join('\n');
+        reply = isEn
+          ? `Here is your instant quote for ${requestedKg} kg of ROAR Roasted Coffee Beans:\n${quoteLines}`
+          : `Báo giá nhanh cho ${requestedKg} kg Cà phê Hạt rang ROAR (tự động áp dụng mức giá theo số kg):\n${quoteLines}`;
+      } else {
+        reply = isEn
+          ? 'ROAR Roasted Coffee Beans include 6 S18 SKUs with automatic 5-tier kg pricing (1kg, 5–19kg, 20–49kg, 50–99kg, Wholesale ≥100kg from 180,000 VND/kg). Select a product below to enter your exact kg:'
+          : 'Danh mục Cà phê Hạt rang ROAR gồm 6 mã S18 có bảng giá tự động 5 mức theo kg (1kg, 5–19kg, 20–49kg, 50–99kg, Sỉ ≥100kg từ 180.000 ₫/kg). Bạn bấm chọn sản phẩm bên dưới để nhập số kg nhé:';
+      }
+      quickLinks = [{ label: isEn ? 'View All Roasted Beans (kg)' : 'Xem bảng giá Cà phê Hạt rang (kg)', to: '/coffee/roasted-beans' }];
+    } else if (q.includes('phin') || q.includes('đậm') || q.includes('mạnh') || q.includes('sữa đá') || q.includes('robusta')) {
+      matched = allProducts.filter((p) => p.slug.includes('lion') || p.slug.includes('tiger') || p.slug.includes('robusta')).slice(0, 3);
+      reply = isEn
+        ? 'For a bold, rich Vietnamese Phin or iced milk coffee, I recommend Lion (Sư Tử — Traditional Phin), Tiger (Hổ — Bold Robusta), or Robusta S18. Click any product below to view details or add to cart:'
+        : 'Với gu đậm đà, pha Phin truyền thống hoặc cà phê sữa đá, mình gợi ý Sư Tử (Lion), Hổ (Tiger) hoặc Robusta S18. Bạn bấm trực tiếp vào sản phẩm bên dưới để xem chi tiết & chọn mua nhé:';
+      quickLinks = [{ label: isEn ? 'Brewing Guide' : 'Hướng dẫn pha Phin chuẩn', to: '/brewing' }];
+    } else if (q.includes('espresso') || q.includes('arabica') || q.includes('chua thanh') || q.includes('nhẹ') || q.includes('quà') || q.includes('signature')) {
+      matched = allProducts
+        .filter((p) => p.slug.includes('signature') || p.slug.includes('fox') || p.slug.includes('eagle') || p.slug.includes('arabica'))
+        .slice(0, 3);
+      reply = isEn
+        ? 'For smooth Espresso, aromatic Arabica, or luxury gifting, explore Black Panther Signature Reserve, Fox Espresso, or Arabica S18 CBU below:'
+        : 'Với gu Espresso hậu ngọt, hương thơm tinh tế hoặc làm quà biếu cao cấp, bạn hãy chọn Báo Đen Signature Reserve, Cáo Espresso hoặc Arabica S18 CBU bên dưới nhé:';
+      quickLinks = [{ label: isEn ? 'Explore 7 Personalities' : 'Khám phá 7 Cá tính ROAR', to: '/personalities' }];
+    } else {
+      matched = allProducts.filter((p) => p.category === 'roasted' || p.category === 'roasted_beans').slice(0, 3);
+      reply = isEn
+        ? 'Hello from ROAR COFFEE®! You can ask me anything: coffee taste recommendations, 5-tier kg quotes, operating hours, contact/Zalo, shipping, vouchers, brewing guides, or B2B green coffee!'
+        : 'Xin chào từ ROAR COFFEE®! Bạn có thể hỏi mình bất cứ thông tin nào: chọn cà phê theo gu, báo giá hạt rang theo kg, giờ làm việc, địa chỉ/Zalo, phí vận chuyển, voucher, cách pha chế hay hợp tác B2B nhé!';
+      quickLinks = [
+        { label: isEn ? 'Roasted Beans (5-tier kg)' : 'Cà phê Hạt rang (5 mức kg)', to: '/coffee/roasted-beans' },
+        { label: isEn ? 'Vouchers & Promos' : 'Xem Voucher ưu đãi', to: '/promotions' },
+      ];
+    }
+
+    res.json({
+      ok: true,
+      reply,
+      recommendedProducts: matched.slice(0, 3).map(hydrateProductCard),
+      quickLinks,
+      fallback: true,
+    });
+  }
 });
 
 app.post('/api/auth/logout', (req, res) => {

@@ -21,6 +21,10 @@ export const AccountPage: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [resetStep, setResetStep] = useState<'request' | 'confirm'>('request');
   const [demoCodeHint, setDemoCodeHint] = useState('');
+  const [socialModal, setSocialModal] = useState<'google' | 'facebook' | null>(null);
+  const [socialEmail, setSocialEmail] = useState('');
+  const [socialName, setSocialName] = useState('');
+  const [socialLoading, setSocialLoading] = useState(false);
 
   const initialTab = (searchParams.get('tab') as any) || 'dashboard';
   const [tab, setTab] = useState<'dashboard' | 'notifications' | 'vouchers' | 'orders' | 'rewards' | 'profile'>(
@@ -114,6 +118,40 @@ export const AccountPage: React.FC = () => {
       showToast(t('Tạo tài khoản ROAR Member thành công!', 'Welcome to ROAR COFFEE Members!'));
     } else {
       showToast(d.error || t('Đăng ký thất bại', 'Registration failed'));
+    }
+  };
+
+  const handleSocialSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!socialModal || !socialEmail.trim()) return;
+    setSocialLoading(true);
+    try {
+      const res = await apiFetch('/api/auth/social', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: socialModal,
+          email: socialEmail.trim(),
+          fullName: socialName.trim() || socialEmail.trim().split('@')[0],
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.user) {
+        setAuthSession(d.user, d.token);
+        setSocialModal(null);
+        setSocialEmail('');
+        setSocialName('');
+        showToast(
+          t(
+            `Đăng nhập thành công qua ${socialModal === 'google' ? 'Google' : 'Facebook'}!`,
+            `Signed in with ${socialModal === 'google' ? 'Google' : 'Facebook'}!`
+          )
+        );
+      } else {
+        showToast(d.error || t('Không thể xác thực tài khoản mạng xã hội.', 'Social sign-in failed.'));
+      }
+    } finally {
+      setSocialLoading(false);
     }
   };
 
@@ -284,6 +322,95 @@ export const AccountPage: React.FC = () => {
         </div>
 
         <div className="bg-white dark:bg-[#16221C] rounded-2xl border border-[#202020]/10 dark:border-white/10 p-6 sm:p-8 space-y-5">
+          {/* Quick Social ID Registration & Sign-In (Google / Facebook) */}
+          {authMode !== 'forgot' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSocialModal('google');
+                    setSocialEmail('');
+                    setSocialName('');
+                  }}
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border border-[#202020]/15 dark:border-white/15 bg-white dark:bg-[#0E1512] hover:bg-slate-50 dark:hover:bg-white/10 text-xs font-semibold text-[#202020] dark:text-[#F1EFEA] transition-colors cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded-full bg-[#EA4335] text-white font-bold text-[10px] flex items-center justify-center">G</span>
+                  <span>{t('Tiếp tục với Google', 'Continue with Google')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSocialModal('facebook');
+                    setSocialEmail('');
+                    setSocialName('');
+                  }}
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border border-[#1877F2]/30 bg-[#1877F2]/5 hover:bg-[#1877F2]/15 text-xs font-semibold text-[#1877F2] dark:text-[#60A5FA] transition-colors cursor-pointer"
+                >
+                  <span className="w-4 h-4 rounded-full bg-[#1877F2] text-white font-bold text-[10px] flex items-center justify-center">f</span>
+                  <span>{t('Tiếp tục với Facebook', 'Continue with Facebook')}</span>
+                </button>
+              </div>
+              <div className="relative flex items-center justify-center">
+                <div className="border-t border-[#202020]/10 dark:border-white/10 w-full" />
+                <span className="bg-white dark:bg-[#16221C] px-3 text-[11px] text-[#202020]/50 dark:text-[#F1EFEA]/50 whitespace-nowrap">
+                  {t('hoặc dùng Email ROAR', 'or use Email')}
+                </span>
+                <div className="border-t border-[#202020]/10 dark:border-white/10 w-full" />
+              </div>
+            </div>
+          )}
+
+          {socialModal && (
+            <form
+              onSubmit={handleSocialSubmit}
+              className="p-4 rounded-xl bg-[#F8F5EF] dark:bg-[#0E1512] border border-[#00552B]/25 dark:border-[#C6A667]/30 space-y-3 text-xs"
+            >
+              <div className="flex items-center justify-between">
+                <p className="font-bold text-[#00552B] dark:text-[#C6A667]">
+                  {socialModal === 'google'
+                    ? t('Xác nhận tài khoản Google', 'Continue with Google Account')
+                    : t('Xác nhận tài khoản Facebook', 'Continue with Facebook Account')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSocialModal(null)}
+                  className="text-[#202020]/60 dark:text-[#F1EFEA]/60 hover:underline cursor-pointer"
+                >
+                  {t('Đóng', 'Close')}
+                </button>
+              </div>
+              <input
+                type="email"
+                required
+                value={socialEmail}
+                onChange={(e) => setSocialEmail(e.target.value)}
+                placeholder={
+                  socialModal === 'google'
+                    ? t('Nhập email Google (vd: tenban@gmail.com)', 'Enter your Google email')
+                    : t('Nhập email Facebook của bạn', 'Enter your Facebook email')
+                }
+                className="w-full bg-white dark:bg-[#16221C] border border-[#202020]/15 dark:border-white/15 rounded-lg px-3 py-2"
+              />
+              <input
+                type="text"
+                value={socialName}
+                onChange={(e) => setSocialName(e.target.value)}
+                placeholder={t('Họ và tên hiển thị (tùy chọn)', 'Display name (optional)')}
+                className="w-full bg-white dark:bg-[#16221C] border border-[#202020]/15 dark:border-white/15 rounded-lg px-3 py-2"
+              />
+              <button
+                type="submit"
+                disabled={socialLoading}
+                className="w-full py-2 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white font-semibold cursor-pointer disabled:opacity-50"
+              >
+                {socialLoading
+                  ? t('Đang xác thực...', 'Connecting...')
+                  : t('Xác nhận & Đăng nhập ngay (+50 điểm)', 'Continue & Sign In (+50 pts)')}
+              </button>
+            </form>
+          )}
+
           <div className="flex border-b border-[#202020]/10 dark:border-white/10 text-xs font-semibold">
             <button
               type="button"

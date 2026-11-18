@@ -143,3 +143,94 @@ export async function translateProductViToEn(
   }
   throw new GeminiTranslationError(friendlyMsg, status, 'UPSTREAM_ERROR');
 }
+
+export interface BaristaChatResponse {
+  reply: string;
+  recommendedSlugs: string[];
+  quickLinks: Array<{ label: string; to: string }>;
+}
+
+export async function chatWithRoarBarista(params: {
+  message: string;
+  history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+  lang?: 'vi' | 'en';
+  catalogSummary?: string;
+}): Promise<BaristaChatResponse> {
+  const ai = getGeminiClient();
+  const isEn = params.lang === 'en';
+  const historyText = (params.history || [])
+    .slice(-6)
+    .map((m) => `${m.role === 'user' ? 'Customer' : 'ROAR Barista'}: ${m.text}`)
+    .join('\n');
+
+  const prompt = `${historyText ? `Previous conversation:\n${historyText}\n\n` : ''}Customer: ${params.message}`;
+
+  const timeoutMs = 8000;
+  const response = await Promise.race([
+    ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: prompt,
+      config: {
+        systemInstruction:
+          `You are ROAR COFFEE® Senior AI Barista & Sales Advisor in Vietnam. Reply warmly, accurately, and concisely in ${
+            isEn ? 'English' : 'Vietnamese'
+          }. ` +
+          `You can answer ANY question about ROAR COFFEE: taste/gu uống recommendations, 7 Brand Personalities (Tiger/Hổ, Lion/Sư Tử, Fox/Cáo, Eagle/Đại Bàng, Black Panther/Báo Đen Signature Reserve, Wolf/Sói, Owl/Cú Mèo), ` +
+          `exact retail & 5-tier kg wholesale quotes (1kg, 5–19kg, 20–49kg, 50–99kg, ≥100kg) for the 6 Roasted Coffee Bean SKUs, 27 B2B Green Coffee SKUs (S14/S16/S18 Natural/Honey/CBU Washed), brewing methods, promotions/vouchers, shipping fees, and order tracking. ` +
+          `Always calculate exact quotes when the customer mentions a kg quantity (e.g. 25kg × tier price/kg). ` +
+          `Return JSON with: "reply" (your helpful answer), "recommendedSlugs" (1 to 3 exact product slugs from the catalog context that best match the customer's taste/question), and "quickLinks" (0 to 2 helpful site links such as /coffee/roasted-beans, /coffee/green-beans, /personalities, /brewing, /promotions, /orders/track, /partners).` +
+          (params.catalogSummary ? `\n\nLive ROAR COFFEE Catalog & Pricing Context:\n${params.catalogSummary}` : ''),
+        thinkingConfig: {
+          thinkingLevel: ThinkingLevel.MINIMAL,
+        },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            reply: { type: Type.STRING, description: 'Helpful barista response with exact pricing/taste advice' },
+            recommendedSlugs: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'Up to 3 exact product slugs from the provided catalog context',
+            },
+            quickLinks: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  label: { type: Type.STRING },
+                  to: { type: Type.STRING },
+                },
+                required: ['label', 'to'],
+              },
+            },
+          },
+          required: ['reply'],
+        },
+      },
+    }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('GEMINI_CHAT_TIMEOUT')), timeoutMs)
+    ),
+  ]);
+
+  const rawText = (response.text || '{}').trim();
+  try {
+    const parsed = JSON.parse(rawText);
+    return {
+      reply: String(parsed.reply || '').trim() || rawText,
+      recommendedSlugs: Array.isArray(parsed.recommendedSlugs)
+        ? parsed.recommendedSlugs.map((s: any) => String(s || '').trim()).filter(Boolean).slice(0, 3)
+        : [],
+      quickLinks: Array.isArray(parsed.quickLinks)
+        ? parsed.quickLinks
+            .filter((l: any) => l && typeof l.label === 'string' && typeof l.to === 'string' && l.to.startsWith('/'))
+            .slice(0, 2)
+        : [],
+    };
+  } catch {
+    return { reply: rawText, recommendedSlugs: [], quickLinks: [] };
+  }
+}
+
+

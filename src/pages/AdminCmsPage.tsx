@@ -2474,6 +2474,26 @@ export const AdminCmsPage: React.FC = () => {
                     />
                   </div>
                   <div>
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Số điện thoại Hotline (Nút Gọi ngay)', 'Hotline Phone (Call Button)')}</label>
+                    <input
+                      type="tel"
+                      value={siteSettings.hotline || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, hotline: e.target.value })}
+                      placeholder="0901234567"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">{t('Số điện thoại Zalo (Nút Chat Zalo)', 'Zalo Phone (Zalo Button)')}</label>
+                    <input
+                      type="tel"
+                      value={siteSettings.zalo_phone || ''}
+                      onChange={(e) => setSiteSettings({ ...siteSettings, zalo_phone: e.target.value })}
+                      placeholder="0901234567"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono"
+                    />
+                  </div>
+                  <div>
                     <label className="block font-semibold text-slate-700 mb-1">{t('Khẩu hiệu thương hiệu (Tiếng Việt)', 'Brand Tagline (VI)')}</label>
                     <input
                       type="text"

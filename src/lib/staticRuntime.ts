@@ -212,6 +212,128 @@ export async function handleStaticApiFallback(
     return jsonResponse({ ok: true, user: toPublicUser(found), token: `static-token-${found.id}` });
   }
 
+  // 2b. Auth: Social (Google / Facebook)
+  if (pathname === '/api/auth/social' && method === 'POST') {
+    const email = String(body.email || '').trim().toLowerCase();
+    const fullName = String(body.fullName || '').trim() || (email ? email.split('@')[0] : 'ROAR Member');
+    if (!email || !email.includes('@')) {
+      return jsonResponse({ error: 'Vui lòng cung cấp email tài khoản hợp lệ.' }, 400);
+    }
+    let found = state.users.find((u) => u.email.toLowerCase() === email);
+    if (!found) {
+      const nextId = Math.max(10, ...state.users.map((u) => u.id)) + 1;
+      found = {
+        id: nextId,
+        email,
+        password: `social-${Date.now()}`,
+        fullName,
+        phone: '',
+        role: 'customer',
+        memberCode: `RC-MEM-${Math.floor(100000 + Math.random() * 900000)}`,
+        tier: 'ROAR Member',
+        emailVerified: true,
+        createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      };
+      state.users.push(found);
+      writeState(state);
+    }
+    return jsonResponse({ ok: true, user: toPublicUser(found), token: `static-token-${found.id}` });
+  }
+
+  // 2c. AI Barista Chat (Smart catalog-aware advisor on static hosting)
+  if (pathname === '/api/ai/chat' && method === 'POST') {
+    const q = String(body.message || '').toLowerCase();
+    const isEn = body.lang === 'en';
+    const kgMatch = q.match(/(\d+)\s*kg/);
+    const requestedKg = kgMatch ? Math.max(1, Number(kgMatch[1])) : null;
+    const allProds = (snap?.tables?.products || []).filter((p: any) => p.status !== 'draft');
+
+    const hydrate = (p: any) => ({
+      id: p.id,
+      slug: p.slug,
+      sku: p.sku,
+      sub_category: p.sub_category || '',
+      category: p.category,
+      name_vi: p.name_vi,
+      name_en: p.name_en,
+      price_vnd: p.price_vnd,
+      price_usd: p.price_usd,
+      image_key: p.image_key,
+      tasting_notes_vi: p.tasting_notes_vi || '',
+      tasting_notes_en: p.tasting_notes_en || '',
+      pricing_tiers: Array.isArray(p.pricing_tiers) ? p.pricing_tiers : JSON.parse(p.pricing_tiers_json || '[]'),
+      variants: Array.isArray(p.variants) ? p.variants : JSON.parse(p.variants_json || '[]'),
+      to: `/product/${p.slug}`,
+    });
+
+    let matched = allProds.filter((p: any) => p.category !== 'green_bean');
+    let quickLinks: Array<{ label: string; to: string }> = [];
+    let reply = '';
+
+    if (q.includes('kg') || q.includes('sỉ') || q.includes('hạt rang') || q.includes('s18') || q.includes('báo giá') || q.includes('wholesale')) {
+      const beans = allProds.filter((p: any) => p.category === 'roasted_beans');
+      matched = beans.filter((p: any) => {
+        if (q.includes('arabica')) return p.name_vi.toLowerCase().includes('arabica');
+        if (q.includes('culi')) return p.name_vi.toLowerCase().includes('culi');
+        if (q.includes('honey')) return p.name_vi.toLowerCase().includes('honey');
+        if (q.includes('cbu')) return p.name_vi.toLowerCase().includes('cbu');
+        if (q.includes('robusta')) return p.name_vi.toLowerCase().includes('robusta');
+        return true;
+      });
+      if (matched.length === 0) matched = beans;
+      const top = matched.slice(0, 3);
+      if (requestedKg) {
+        const lines = top
+          .map((p: any) => {
+            const tiers = Array.isArray(p.pricing_tiers) ? p.pricing_tiers : JSON.parse(p.pricing_tiers_json || '[]');
+            const tier = resolveVolumeTier(tiers, requestedKg);
+            const unitP = tier ? tier.priceVnd : p.price_vnd;
+            return `• ${p.name_vi} (${p.sub_category}): ${unitP.toLocaleString('vi-VN')} ₫/kg → ${requestedKg} kg = ${(unitP * requestedKg).toLocaleString('vi-VN')} ₫`;
+          })
+          .join('\n');
+        reply = isEn
+          ? `Instant quote for ${requestedKg} kg of ROAR Roasted Coffee Beans:\n${lines}`
+          : `Báo giá nhanh cho ${requestedKg} kg Cà phê Hạt rang ROAR:\n${lines}`;
+      } else {
+        reply = isEn
+          ? 'ROAR Roasted Coffee Beans feature 6 S18 SKUs with 5 automatic kg tiers (1kg, 5–19kg, 20–49kg, 50–99kg, Wholesale ≥100kg from 180,000 VND/kg). Pick a product below:'
+          : 'Danh mục Cà phê Hạt rang ROAR gồm 6 mã S18 với 5 mức giá tự động theo kg (1kg, 5–19kg, 20–49kg, 50–99kg, Sỉ ≥100kg từ 180.000 ₫/kg). Bạn bấm chọn sản phẩm bên dưới nhé:';
+      }
+      quickLinks = [{ label: isEn ? 'All Roasted Beans (kg)' : 'Xem tất cả Cà phê Hạt rang (kg)', to: '/coffee/roasted-beans' }];
+    } else if (q.includes('phin') || q.includes('đậm') || q.includes('mạnh') || q.includes('sữa đá') || q.includes('robusta')) {
+      matched = allProds.filter((p: any) => p.slug.includes('lion') || p.slug.includes('tiger') || p.slug.includes('robusta')).slice(0, 3);
+      reply = isEn
+        ? 'For bold Vietnamese Phin or iced milk coffee, try Lion (Sư Tử), Tiger (Hổ), or Robusta S18 below:'
+        : 'Với gu đậm đà pha Phin hoặc cà phê sữa đá, mình gợi ý Sư Tử (Lion), Hổ (Tiger) hoặc Robusta S18 bên dưới nhé:';
+      quickLinks = [{ label: isEn ? 'Brewing Guide' : 'Hướng dẫn pha Phin chuẩn', to: '/brewing' }];
+    } else if (q.includes('espresso') || q.includes('arabica') || q.includes('chua thanh') || q.includes('nhẹ') || q.includes('quà') || q.includes('signature')) {
+      matched = allProds
+        .filter((p: any) => p.slug.includes('signature') || p.slug.includes('fox') || p.slug.includes('eagle') || p.slug.includes('arabica'))
+        .slice(0, 3);
+      reply = isEn
+        ? 'For smooth Espresso, aromatic Arabica, or executive gifting, explore Black Panther Signature Reserve, Fox Espresso, or Arabica S18 CBU:'
+        : 'Với gu Espresso hậu ngọt, thơm thanh hoặc làm quà biếu, bạn xem Báo Đen Signature Reserve, Cáo Espresso hoặc Arabica S18 CBU bên dưới nhé:';
+      quickLinks = [{ label: isEn ? '7 Brand Personalities' : 'Khám phá 7 Cá tính ROAR', to: '/personalities' }];
+    } else {
+      matched = allProds.filter((p: any) => p.category === 'roasted' || p.category === 'roasted_beans').slice(0, 3);
+      reply = isEn
+        ? 'Welcome to ROAR COFFEE® AI Barista! Tell me your taste preference (bold Phin, smooth Espresso, kg wholesale quote, or B2B green beans) and I will recommend the best products!'
+        : 'Chào bạn đến với ROAR COFFEE® AI Barista! Hãy cho mình biết gu uống (đậm đà pha Phin, thơm mượt Espresso, báo giá hạt rang theo kg hay nhân xanh B2B) để mình gợi ý sản phẩm & báo giá chính xác nhé!';
+      quickLinks = [
+        { label: isEn ? 'Roasted Beans (5-tier kg)' : 'Cà phê Hạt rang (5 mức kg)', to: '/coffee/roasted-beans' },
+        { label: isEn ? 'Vouchers & Promos' : 'Xem Voucher ưu đãi', to: '/promotions' },
+      ];
+    }
+
+    return jsonResponse({
+      ok: true,
+      reply,
+      recommendedProducts: matched.slice(0, 3).map(hydrate),
+      quickLinks,
+      fallback: true,
+    });
+  }
+
   // 3. Auth: Me & Logout
   if (pathname === '/api/auth/me' && method === 'GET') {
     const u = resolveTokenUser(headers, state);

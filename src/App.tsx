@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { AdaptiveLogo } from './components/AdaptiveLogo';
 import { Breadcrumb } from './components/Breadcrumb';
 import { CartDrawer } from './components/CartDrawer';
+import { FloatingAssistDock } from './components/FloatingAssistDock';
 import { Footer } from './components/Footer';
 import { Header } from './components/Header';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -186,6 +187,7 @@ function AppLayout() {
       </main>
       <Footer />
       <MobileBottomNav />
+      <FloatingAssistDock />
       <CartDrawer />
     </div>
   );
