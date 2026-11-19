@@ -234,76 +234,93 @@ export const HomePage: React.FC = () => {
               </Link>
             </div>
 
-            {/* Dynamic Rich Metrics Strip: 7 Personalities · 27+ SKUs · CBU */}
-            <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-white/15">
-              <Link
-                to={localePath('/personalities')}
-                className="group p-2.5 rounded-lg bg-white/5 hover:bg-white/12 border border-white/10 hover:border-[#C6A667]/50 transition-all"
-              >
-                <div className="flex items-baseline justify-between gap-1">
-                  <span className="font-mono text-base sm:text-lg font-bold text-[#C6A667] tabular-nums group-hover:scale-105 transition-transform origin-left">
-                    7
-                  </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#C6A667] animate-pulse" />
+            {/* Dynamic Horizontal Running Carousel of 8 Diverse Metrics */}
+            <div className="pt-3 border-t border-white/15">
+              <div className="relative overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_5%,black_95%,transparent)]">
+                <div className="animate-metrics-marquee gap-2.5">
+                  {[0, 1].map((dup) => (
+                    <div key={dup} className="flex items-stretch gap-2.5 pr-2.5" aria-hidden={dup === 1}>
+                      {[
+                        {
+                          value: '7',
+                          dot: 'bg-[#C6A667]',
+                          title: t('Cá tính thương hiệu', 'Brand Personalities'),
+                          sub: t('Hổ · Sư Tử · Cáo · Báo Đen · Sói', 'Tiger · Lion · Fox · Panther · Wolf'),
+                          to: '/personalities',
+                        },
+                        {
+                          value: '27+ SKUs',
+                          dot: 'bg-emerald-400',
+                          title: t('Ma trận Nhân xanh B2B', 'B2B Green Coffee Matrix'),
+                          sub: t('Robusta · Arabica · Culi S14–S18', 'Robusta · Arabica · Culi S14–S18'),
+                          to: '/coffee/green-beans',
+                        },
+                        {
+                          value: 'CBU',
+                          dot: 'bg-amber-300',
+                          title: t('Chuẩn Chế Biến Ướt', 'Washed CBU Standard'),
+                          sub: t('Full Washed · Honey · Natural', 'Full Washed · Honey · Natural'),
+                          to: '/coffee/roasted-beans',
+                        },
+                        {
+                          value: '6 S18',
+                          dot: 'bg-[#C6A667]',
+                          title: t('Hạt rang 5 mức giá kg', 'Roasted Beans 5-Tier kg'),
+                          sub: t('1kg · 5–19kg · 20–99kg · ≥100kg', '1kg · 5–19kg · 20–99kg · ≥100kg'),
+                          to: '/coffee/roasted-beans',
+                        },
+                        {
+                          value: '10 Vùng',
+                          dot: 'bg-emerald-300',
+                          title: t('Cao nguyên Việt Nam', 'Vietnam Highland Origins'),
+                          sub: t('Cầu Đất 1.500m · Buôn Ma Thuột', 'Cau Dat 1,500m · Buon Ma Thuot'),
+                          to: '/regions',
+                        },
+                        {
+                          value: '100% Mộc',
+                          dot: 'bg-amber-400',
+                          title: t('Rang mới chuẩn COA', 'Fresh Roast · COA Verified'),
+                          sub: t('Không tẩm ướp · Ẩm ≤12.5%', 'Pure roast · Moisture ≤12.5%'),
+                          to: '/quality',
+                        },
+                        {
+                          value: 'OEM / B2B',
+                          dot: 'bg-[#C6A667]',
+                          title: t('Gia công & Xuất khẩu', 'OEM Roasting & Export'),
+                          sub: t('HORECA · Nhãn riêng · Mẫu thử', 'HORECA · Private Label · Samples'),
+                          to: '/partners',
+                        },
+                        {
+                          value: '24/7 AI',
+                          dot: 'bg-emerald-400',
+                          title: t('Barista & Báo giá nhanh', 'AI Barista & Instant Quote'),
+                          sub: t('Tư vấn gu uống · Báo giá theo kg', 'Taste match · Live kg quotes'),
+                          to: '/brewing',
+                        },
+                      ].map((item, idx) => (
+                        <Link
+                          key={`${dup}-${idx}`}
+                          to={localePath(item.to)}
+                          className="group w-[178px] sm:w-[192px] shrink-0 p-2.5 rounded-lg bg-white/6 hover:bg-white/14 border border-white/12 hover:border-[#C6A667]/60 transition-all"
+                        >
+                          <div className="flex items-baseline justify-between gap-1">
+                            <span className="font-mono text-sm sm:text-base font-bold text-[#C6A667] tabular-nums group-hover:scale-105 transition-transform origin-left">
+                              {item.value}
+                            </span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${item.dot} animate-pulse`} />
+                          </div>
+                          <span className="block text-[11px] font-semibold text-white leading-tight mt-0.5 truncate">
+                            {item.title}
+                          </span>
+                          <span className="block text-[10px] text-[#F8F5EF]/70 mt-0.5 truncate">
+                            {item.sub}
+                          </span>
+                        </Link>
+                      ))}
+                    </div>
+                  ))}
                 </div>
-                <span className="block text-[11px] font-semibold text-white leading-tight mt-0.5">
-                  {t('Cá tính thương hiệu', 'Brand Personalities')}
-                </span>
-                <span className="block text-[10px] text-[#F8F5EF]/70 mt-0.5 truncate transition-opacity duration-500">
-                  {[
-                    t('Hổ · Sư Tử · Cáo · Đại Bàng', 'Tiger · Lion · Fox · Eagle'),
-                    t('Báo Đen · Sói · Cú Mèo', 'Black Panther · Wolf · Owl'),
-                    t('7 câu chuyện gu vị riêng biệt', '7 signature flavor personas'),
-                    t('Phin · Espresso · Signature', 'Phin · Espresso · Signature'),
-                  ][heroIdx % 4]}
-                </span>
-              </Link>
-
-              <Link
-                to={localePath('/coffee/green-beans')}
-                className="group p-2.5 rounded-lg bg-white/5 hover:bg-white/12 border border-white/10 hover:border-[#C6A667]/50 transition-all"
-              >
-                <div className="flex items-baseline justify-between gap-1">
-                  <span className="font-mono text-base sm:text-lg font-bold text-[#C6A667] tabular-nums group-hover:scale-105 transition-transform origin-left">
-                    27+ SKUs
-                  </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                </div>
-                <span className="block text-[11px] font-semibold text-white leading-tight mt-0.5">
-                  {t('Nhân xanh & Hạt rang', 'Green & Roasted Matrix')}
-                </span>
-                <span className="block text-[10px] text-[#F8F5EF]/70 mt-0.5 truncate transition-opacity duration-500">
-                  {[
-                    t('Robusta · Arabica · Culi S14–S18', 'Robusta · Arabica · Culi S14–S18'),
-                    t('+6 dòng Hạt rang 5 mức giá kg', '+6 Roasted Beans 5-tier kg'),
-                    t('10 vùng trồng cao nguyên VN', '10 Vietnam highland origins'),
-                    t('Sẵn sàng gửi mẫu thử & B2B', 'Sample & B2B export ready'),
-                  ][heroIdx % 4]}
-                </span>
-              </Link>
-
-              <Link
-                to={localePath('/coffee/roasted-beans')}
-                className="group p-2.5 rounded-lg bg-white/5 hover:bg-white/12 border border-white/10 hover:border-[#C6A667]/50 transition-all"
-              >
-                <div className="flex items-baseline justify-between gap-1">
-                  <span className="font-mono text-base sm:text-lg font-bold text-[#C6A667] tabular-nums group-hover:scale-105 transition-transform origin-left">
-                    CBU
-                  </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" />
-                </div>
-                <span className="block text-[11px] font-semibold text-white leading-tight mt-0.5">
-                  {t('Chuẩn Chế Biến Ướt', 'Washed Designation')}
-                </span>
-                <span className="block text-[10px] text-[#F8F5EF]/70 mt-0.5 truncate transition-opacity duration-500">
-                  {[
-                    t('Full Washed · Honey · Natural', 'Full Washed · Honey · Natural'),
-                    t('Ẩm ≤12.5% · Sàng S18 sạch sâu', 'Moisture ≤12.5% · Clean S18'),
-                    t('Hậu vị ngọt thanh, hương sạch', 'Clean cup & sweet finish'),
-                    t('Chuẩn rang mộc & xuất khẩu', 'Specialty & export grade'),
-                  ][heroIdx % 4]}
-                </span>
-              </Link>
+              </div>
             </div>
           </div>
 
