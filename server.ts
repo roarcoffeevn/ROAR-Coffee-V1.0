@@ -697,8 +697,209 @@ app.get('/api/auth/me', (req: AuthedRequest, res) => {
       companyName: user.company_name,
       b2bVerified: Boolean(user.b2b_verified),
       points,
+      walletBalanceVnd: Number(user.wallet_balance_vnd || 0),
       unreadNotifications,
     },
+  });
+});
+
+const WALLET_TOPUP_PACKAGES = [
+  { amountVnd: 100000, bonusPct: 10, labelVi: 'Gói Khởi Động · Tặng +10%', labelEn: 'Starter Pack · +10% Bonus' },
+  { amountVnd: 500000, bonusPct: 15, labelVi: 'Gói Thành Viên · Tặng +15%', labelEn: 'Member Pack · +15% Bonus' },
+  { amountVnd: 1000000, bonusPct: 20, labelVi: 'Gói Vàng (Gold) · Tặng +20%', labelEn: 'Gold Pack · +20% Bonus' },
+  { amountVnd: 2000000, bonusPct: 30, labelVi: 'Gói Reserve VIP · Tặng +30%', labelEn: 'Reserve VIP · +30% Bonus' },
+];
+
+function resolveWalletBonusPct(amountVnd: number): number {
+  if (amountVnd >= 2000000) return 30;
+  if (amountVnd >= 1000000) return 20;
+  if (amountVnd >= 500000) return 15;
+  return 10;
+}
+
+app.get('/api/wallet', requireAuth, (req: AuthedRequest, res) => {
+  const user = db.prepare('SELECT id, full_name, member_code, tier, wallet_balance_vnd FROM users WHERE id = ?').get(req.authUser!.userId) as any;
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+  const points = getPointsSummary(user.id);
+  const transactions = db
+    .prepare('SELECT * FROM wallet_transactions WHERE user_id = ? ORDER BY id DESC LIMIT 30')
+    .all(user.id);
+  res.json({
+    walletBalanceVnd: Number(user.wallet_balance_vnd || 0),
+    points,
+    tier: user.tier,
+    memberCode: user.member_code,
+    packages: WALLET_TOPUP_PACKAGES.map((p) => {
+      const bonusVnd = Math.round((p.amountVnd * p.bonusPct) / 100);
+      return {
+        ...p,
+        bonusVnd,
+        totalCreditVnd: p.amountVnd + bonusVnd,
+        bonusPoints: Math.floor((p.amountVnd + bonusVnd) / 10000),
+      };
+    }),
+    transactions,
+  });
+});
+
+app.post('/api/wallet/topup', requireAuth, (req: AuthedRequest, res) => {
+  const amountVnd = Math.floor(Number(req.body?.amountVnd || 0));
+  if (!Number.isFinite(amountVnd) || amountVnd < 50000) {
+    res.status(400).json({ error: 'Số tiền nạp tối thiểu là 50.000₫' });
+    return;
+  }
+  const bonusPct = resolveWalletBonusPct(amountVnd);
+  const bonusVnd = Math.round((amountVnd * bonusPct) / 100);
+  const totalCreditVnd = amountVnd + bonusVnd;
+  const pointsDelta = Math.floor(totalCreditVnd / 10000);
+  const refCode = `TOPUP-${Date.now().toString(36).toUpperCase()}`;
+
+  db.prepare('UPDATE users SET wallet_balance_vnd = wallet_balance_vnd + ? WHERE id = ?').run(
+    totalCreditVnd,
+    req.authUser!.userId
+  );
+
+  db.prepare(`
+    INSERT INTO wallet_transactions (user_id, tx_type, amount_vnd, bonus_vnd, bonus_pct, points_delta, note, reference_code)
+    VALUES (?, 'topup', ?, ?, ?, ?, ?, ?)
+  `).run(
+    req.authUser!.userId,
+    amountVnd,
+    bonusVnd,
+    bonusPct,
+    pointsDelta,
+    `Nạp ví ${amountVnd.toLocaleString('vi-VN')}₫ + Thưởng ${bonusPct}% (${bonusVnd.toLocaleString('vi-VN')}₫)`,
+    refCode
+  );
+
+  if (pointsDelta > 0) {
+    db.prepare(`
+      INSERT INTO points_ledger (user_id, order_id, entry_type, points, description_vi, description_en, expires_at)
+      VALUES (?, NULL, 'earn_available', ?, ?, ?, datetime('now', '+365 days'))
+    `).run(
+      req.authUser!.userId,
+      pointsDelta,
+      `Tích điểm thưởng khi nạp Ví ROAR (${refCode})`,
+      `Reward points earned from ROAR Wallet top-up (${refCode})`
+    );
+  }
+
+  const updatedUser = db.prepare('SELECT wallet_balance_vnd FROM users WHERE id = ?').get(req.authUser!.userId) as any;
+  res.json({
+    ok: true,
+    referenceCode: refCode,
+    amountVnd,
+    bonusPct,
+    bonusVnd,
+    totalCreditVnd,
+    pointsDelta,
+    walletBalanceVnd: Number(updatedUser?.wallet_balance_vnd || 0),
+  });
+});
+
+app.get('/api/admin/wallets', requirePermission('promotions'), (_req, res) => {
+  const members = db
+    .prepare(
+      `SELECT id, full_name, email, phone, member_code, tier, role, wallet_balance_vnd, created_at
+       FROM users ORDER BY wallet_balance_vnd DESC, id DESC LIMIT 100`
+    )
+    .all() as any[];
+
+  const enriched = members.map((m) => ({
+    ...m,
+    points: getPointsSummary(m.id),
+  }));
+
+  const transactions = db
+    .prepare(
+      `SELECT wt.*, u.full_name, u.email, u.member_code
+       FROM wallet_transactions wt
+       JOIN users u ON u.id = wt.user_id
+       ORDER BY wt.id DESC LIMIT 60`
+    )
+    .all();
+
+  res.json({ members: enriched, transactions });
+});
+
+app.post('/api/admin/wallets/adjust', requirePermission('promotions'), (req: AuthedRequest, res) => {
+  const userId = Number(req.body?.userId || 0);
+  const amountVnd = Math.floor(Number(req.body?.amountVnd || 0));
+  const pointsDelta = Math.floor(Number(req.body?.pointsDelta || 0));
+  const applyBonus = Boolean(req.body?.applyBonus);
+  const note = String(req.body?.note || '').trim();
+
+  const target = db.prepare('SELECT id, email, full_name, wallet_balance_vnd FROM users WHERE id = ?').get(userId) as any;
+  if (!target) {
+    res.status(404).json({ error: 'Không tìm thấy thành viên.' });
+    return;
+  }
+
+  let bonusPct = 0;
+  let bonusVnd = 0;
+  let totalCreditVnd = amountVnd;
+  let autoPoints = 0;
+
+  if (amountVnd > 0 && applyBonus) {
+    bonusPct = resolveWalletBonusPct(amountVnd);
+    bonusVnd = Math.round((amountVnd * bonusPct) / 100);
+    totalCreditVnd = amountVnd + bonusVnd;
+    autoPoints = Math.floor(totalCreditVnd / 10000);
+  }
+
+  const finalPoints = pointsDelta + autoPoints;
+  const refCode = `ADM-${Date.now().toString(36).toUpperCase()}`;
+
+  if (totalCreditVnd !== 0) {
+    db.prepare('UPDATE users SET wallet_balance_vnd = MAX(0, wallet_balance_vnd + ?) WHERE id = ?').run(
+      totalCreditVnd,
+      userId
+    );
+    db.prepare(`
+      INSERT INTO wallet_transactions (user_id, tx_type, amount_vnd, bonus_vnd, bonus_pct, points_delta, note, reference_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      totalCreditVnd > 0 ? 'topup' : 'spend',
+      amountVnd,
+      bonusVnd,
+      bonusPct,
+      finalPoints,
+      note || (totalCreditVnd > 0 ? `Admin nạp ví +${totalCreditVnd.toLocaleString('vi-VN')}₫` : `Admin điều chỉnh ví ${totalCreditVnd.toLocaleString('vi-VN')}₫`),
+      refCode
+    );
+  }
+
+  if (finalPoints !== 0) {
+    db.prepare(`
+      INSERT INTO points_ledger (user_id, order_id, entry_type, points, description_vi, description_en, expires_at)
+      VALUES (?, NULL, ?, ?, ?, ?, datetime('now', '+365 days'))
+    `).run(
+      userId,
+      finalPoints > 0 ? 'earn_available' : 'redeem',
+      finalPoints,
+      note || `Admin điều chỉnh điểm (${refCode})`,
+      note || `Admin points adjustment (${refCode})`
+    );
+  }
+
+  logAudit(req.authUser!.userId, req.authUser!.email, 'wallet_adjust', 'user', userId, {
+    amountVnd,
+    bonusPct,
+    bonusVnd,
+    finalPoints,
+    note,
+  });
+
+  const updated = db.prepare('SELECT wallet_balance_vnd FROM users WHERE id = ?').get(userId) as any;
+  res.json({
+    ok: true,
+    walletBalanceVnd: Number(updated?.wallet_balance_vnd || 0),
+    points: getPointsSummary(userId),
+    referenceCode: refCode,
   });
 });
 
@@ -1150,13 +1351,56 @@ app.post('/api/orders', (req: AuthedRequest, res) => {
     const total = Math.max(0, subtotal - discountAmount - pointsDiscount + shippingFee);
     const orderNumber = `RC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
+    let initialPaymentStatus = 'awaiting_payment';
+    if (paymentMethod === 'wallet') {
+      if (!req.authUser) {
+        res.status(401).json({ error: 'Vui lòng đăng nhập để thanh toán bằng Ví Thành viên ROAR.' });
+        return;
+      }
+      const uWallet = db.prepare('SELECT wallet_balance_vnd FROM users WHERE id = ?').get(req.authUser.userId) as any;
+      const currentBal = Number(uWallet?.wallet_balance_vnd || 0);
+      if (currentBal < total) {
+        res.status(400).json({ error: `Số dư Ví ROAR (${currentBal.toLocaleString('vi-VN')}₫) không đủ để thanh toán đơn hàng ${total.toLocaleString('vi-VN')}₫.` });
+        return;
+      }
+      db.prepare('UPDATE users SET wallet_balance_vnd = wallet_balance_vnd - ? WHERE id = ?').run(total, req.authUser.userId);
+      db.prepare(`
+        INSERT INTO wallet_transactions (user_id, tx_type, amount_vnd, bonus_vnd, bonus_pct, points_delta, note, reference_code)
+        VALUES (?, 'spend', ?, 0, 0, 0, ?, ?)
+      `).run(
+        req.authUser.userId,
+        -total,
+        `Thanh toán đơn hàng ${orderNumber}`,
+        orderNumber
+      );
+      initialPaymentStatus = 'paid';
+    } else if (paymentMethod === 'points') {
+      if (!req.authUser) {
+        res.status(401).json({ error: 'Vui lòng đăng nhập để mua hàng bằng Điểm thưởng ROAR.' });
+        return;
+      }
+      const loyalty = db.prepare('SELECT * FROM loyalty_settings WHERE id = 1').get() as any;
+      const vndPerPoint = Number(loyalty?.vnd_per_point || 100);
+      const summary = getPointsSummary(req.authUser.userId);
+      const pointsNeeded = Math.ceil(total / vndPerPoint);
+      if (summary.available < pointsNeeded) {
+        res.status(400).json({
+          error: `Bạn cần ${pointsNeeded.toLocaleString('vi-VN')} điểm để thanh toán đơn này (hiện có ${summary.available.toLocaleString('vi-VN')} điểm).`,
+        });
+        return;
+      }
+      pointsRedeemed += pointsNeeded;
+      pointsDiscount += total;
+      initialPaymentStatus = 'paid';
+    }
+
     const orderResult = db
       .prepare(`
         INSERT INTO orders (
           order_number, user_id, customer_name, customer_email, customer_phone, shipping_address,
           currency, subtotal, discount_amount, points_redeemed, points_discount, shipping_fee, total,
           voucher_code, payment_method, payment_status, order_status, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_payment', 'Pending', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
       `)
       .run(
         orderNumber,
@@ -1165,7 +1409,7 @@ app.post('/api/orders', (req: AuthedRequest, res) => {
         String(customerEmail).trim().toLowerCase(),
         String(customerPhone).trim(),
         String(shippingAddress).trim(),
-        currency === 'USD' ? 'USD' : 'VND',
+        currency || 'VND',
         subtotal,
         discountAmount,
         pointsRedeemed,
@@ -1173,7 +1417,8 @@ app.post('/api/orders', (req: AuthedRequest, res) => {
         shippingFee,
         total,
         appliedVoucher,
-        String(paymentMethod || 'cod'),
+        paymentMethod || 'cod',
+        initialPaymentStatus,
         String(notes || '').trim()
       );
 
@@ -1953,7 +2198,7 @@ app.patch('/api/admin/orders/:id', requirePermission('orders'), (req: AuthedRequ
 
 app.get('/api/admin/customers', requirePermission('customers'), (_req, res) => {
   const users = db
-    .prepare('SELECT id, email, full_name, phone, role, member_code, tier, email_verified, company_name, b2b_verified, deletion_requested, created_at FROM users ORDER BY id DESC')
+    .prepare('SELECT id, email, full_name, phone, role, member_code, tier, wallet_balance_vnd, email_verified, company_name, b2b_verified, deletion_requested, created_at FROM users ORDER BY id DESC')
     .all() as any[];
   const enriched = users.map((u) => {
     const orderStats = db

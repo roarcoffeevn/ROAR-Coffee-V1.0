@@ -1374,6 +1374,258 @@ function seedInitialData(): void {
       );
     }
   }
+
+  // Wallet balance & Starbucks-style Rewards Wallet transactions
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (!userCols.some((c) => c.name === 'wallet_balance_vnd')) {
+    db.exec(`ALTER TABLE users ADD COLUMN wallet_balance_vnd INTEGER NOT NULL DEFAULT 0;`);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wallet_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      tx_type TEXT NOT NULL CHECK(tx_type IN ('topup', 'spend', 'refund')),
+      amount_vnd INTEGER NOT NULL,
+      bonus_vnd INTEGER NOT NULL DEFAULT 0,
+      bonus_pct INTEGER NOT NULL DEFAULT 0,
+      points_delta INTEGER NOT NULL DEFAULT 0,
+      note TEXT DEFAULT '',
+      reference_code TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+
+  // Idempotent Gift Voucher products (50k, 100k, 500k, 1,000,000 VND)
+  const giftVouchers = [
+    {
+      slug: 'gift-voucher-50k',
+      sku: 'RC-GIFT-50K',
+      barcode: generateEan13Barcode(9201),
+      priceVnd: 50000,
+      priceUsd: 2.0,
+      nameVi: 'Thẻ Quà Tặng ROAR Gift Voucher 50.000₫',
+      nameEn: 'ROAR Coffee Gift Voucher 50,000 VND',
+      subVi: 'Phiếu quà tặng điện tử & thẻ cứng mệnh giá 50.000₫ — áp dụng toàn hệ thống ROAR COFFEE®',
+      subEn: 'Digital & printed 50,000 VND gift voucher redeemable across all ROAR COFFEE® products',
+      descVi:
+        'Thẻ quà tặng ROAR COFFEE® mệnh giá 50.000₫ là lời chúc năng lượng tinh tế cho bạn bè, đồng nghiệp. Áp dụng mua mọi dòng cà phê rang xay, cà phê hạt rang theo kg, cà phê hòa tan và bộ quà tặng tại website ROAR COFFEE®.',
+      descEn:
+        'The 50,000 VND ROAR COFFEE® Gift Voucher is a thoughtful daily treat for friends and colleagues. Redeemable across roasted coffee, whole beans by kg, instant gold, and gift sets.',
+      imageKey: 'hero-roast',
+    },
+    {
+      slug: 'gift-voucher-100k',
+      sku: 'RC-GIFT-100K',
+      barcode: generateEan13Barcode(9202),
+      priceVnd: 100000,
+      priceUsd: 4.0,
+      nameVi: 'Thẻ Quà Tặng ROAR Gift Voucher 100.000₫',
+      nameEn: 'ROAR Coffee Gift Voucher 100,000 VND',
+      subVi: 'Phiếu quà tặng mệnh giá 100.000₫ — tặng kèm thiệp chúc mừng sang trọng',
+      subEn: '100,000 VND gift voucher with complimentary greeting card',
+      descVi:
+        'Thẻ quà tặng ROAR COFFEE® mệnh giá 100.000₫ phù hợp làm quà sinh nhật, tri ân khách hàng hoặc phần thưởng nội bộ. Có thể dùng trực tiếp khi thanh toán hoặc nạp quy đổi vào Ví Thành viên ROAR.',
+      descEn:
+        'Ideal for birthdays, client appreciation, or team rewards. Use directly at checkout or redeem into a ROAR Member Wallet.',
+      imageKey: 'signature-reserve',
+    },
+    {
+      slug: 'gift-voucher-500k',
+      sku: 'RC-GIFT-500K',
+      barcode: generateEan13Barcode(9203),
+      priceVnd: 500000,
+      priceUsd: 20.0,
+      nameVi: 'Thẻ Quà Tặng ROAR Gift Voucher 500.000₫',
+      nameEn: 'ROAR Coffee Gift Voucher 500,000 VND',
+      subVi: 'Thẻ quà tặng cao cấp mệnh giá 500.000₫ — thiết kế đen huyền ép kim vàng',
+      subEn: 'Premium 500,000 VND obsidian-and-gold foil gift card',
+      descVi:
+        'Thẻ quà tặng ROAR COFFEE® mệnh giá 500.000₫ được thiết kế hộp phong bì đen huyền ép kim vàng champagne. Thích hợp tặng đối tác, cấp trên hoặc người yêu cà phê đặc sản Việt Nam.',
+      descEn:
+        'Presented in a signature matte obsidian & champagne-gold sleeve, the 500,000 VND Gift Voucher is crafted for partners, executives, and specialty coffee lovers.',
+      imageKey: 'signature-reserve',
+    },
+    {
+      slug: 'gift-voucher-1m',
+      sku: 'RC-GIFT-1M',
+      barcode: generateEan13Barcode(9204),
+      priceVnd: 1000000,
+      priceUsd: 40.0,
+      nameVi: 'Thẻ Quà Tặng ROAR Gift Voucher 1.000.000₫',
+      nameEn: 'ROAR Coffee Gift Voucher 1,000,000 VND',
+      subVi: 'Thẻ quà tặng VIP mệnh giá 1.000.000₫ — đặc quyền khách hàng Signature Reserve',
+      subEn: 'VIP 1,000,000 VND gift voucher with Signature Reserve privileges',
+      descVi:
+        'Thẻ quà tặng VIP ROAR COFFEE® mệnh giá 1.000.000₫ dành cho quà tặng doanh nghiệp, lễ Tết và tri ân đối tác chiến lược. Hạn sử dụng 12 tháng, áp dụng toàn bộ danh mục bán lẻ, hạt rang theo kg và quà tặng cao cấp.',
+      descEn:
+        'Our flagship 1,000,000 VND VIP Gift Voucher tailored for corporate gifting, festive occasions, and strategic partners. Valid for 12 months across all retail, kg beans, and reserve collections.',
+      imageKey: 'signature-reserve',
+    },
+  ];
+
+  const checkProd = db.prepare('SELECT id FROM products WHERE slug = ?');
+  const insertGift = db.prepare(`
+    INSERT INTO products (
+      slug, sku, barcode, category, sub_category, name_vi, name_en, subtitle_vi, subtitle_en,
+      description_vi, description_en, coffee_type, blend_summary_vi, blend_summary_en,
+      roast_profile_vi, roast_profile_en, tasting_notes_vi, tasting_notes_en,
+      brewing_methods_json, variants_json, price_vnd, price_usd, inventory, image_key,
+      featured, status
+    ) VALUES (?, ?, ?, 'roasted', 'Gift Voucher', ?, ?, ?, ?, ?, ?, 'Gift Voucher', ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, 999, ?, 1, 'active')
+  `);
+  for (const g of giftVouchers) {
+    if (!checkProd.get(g.slug)) {
+      insertGift.run(
+        g.slug,
+        g.sku,
+        g.barcode,
+        g.nameVi,
+        g.nameEn,
+        g.subVi,
+        g.subEn,
+        g.descVi,
+        g.descEn,
+        `Mệnh giá ${g.priceVnd.toLocaleString('vi-VN')}₫ · Hạn dùng 12 tháng`,
+        `Value ${g.priceVnd.toLocaleString('vi-VN')} VND · Valid 12 months`,
+        'Thẻ cứng ép kim & Mã điện tử',
+        'Foil Card & Digital Code',
+        'Áp dụng toàn hệ thống ROAR COFFEE®',
+        'Redeemable storewide at ROAR COFFEE®',
+        JSON.stringify([
+          { label: `E-Voucher (${g.priceVnd.toLocaleString('vi-VN')}₫)`, priceVnd: g.priceVnd, priceUsd: g.priceUsd },
+          { label: `Thẻ cứng + Hộp quà (${g.priceVnd.toLocaleString('vi-VN')}₫)`, priceVnd: g.priceVnd, priceUsd: g.priceUsd },
+        ]),
+        g.priceVnd,
+        g.priceUsd,
+        g.imageKey
+      );
+    }
+  }
+
+  // Idempotent rich Journal Articles (replaceable images in CMS)
+  const extraJournalArticles = [
+    {
+      slug: 'nghe-thuat-pha-phin-viet-nam-chuan-roar',
+      category: 'Brewing',
+      tags: ['Pha Phin', 'Robusta', 'Văn hóa cà phê'],
+      titleVi: 'Nghệ Thuật Pha Phin Việt Nam: 5 Bí Quyết Chiết Xuất Đậm Sâu Không Chát',
+      titleEn: 'The Art of Vietnamese Phin Brewing: 5 Secrets for Rich, Clean Extraction',
+      excerptVi: 'Từ độ mịn cỡ bột, nhiệt độ nước 92–95°C đến kỹ thuật ủ bloom 30 giây giúp ly cà phê Phin dậy hương sô-cô-la và hậu ngọt kéo dài.',
+      excerptEn: 'From grind size and 92–95°C water temperature to the 30-second bloom that unlocks deep cacao aromatics and a clean sweet finish.',
+      contentVi:
+        'Pha Phin không chỉ là một phương pháp chiết xuất — đó là nghi thức chậm rãi đặc trưng của người Việt. Để ly Phin đạt độ sánh mịn mà không bị khét hay chát gắt, yếu tố đầu tiên là chọn cà phê rang mộc 100% ở mức Medium-Dark như dòng Sư Tử (Lion) hoặc Robusta S18.\n\n1. Tráng nóng Phin bằng nước sôi trước khi cho 25g bột cà phê xay vừa-thô.\n2. Rót 25ml nước 92–95°C ủ nở (bloom) trong 30 giây để giải phóng khí CO2.\n3. Nén nhẹ nắp gài vừa tay, sau đó châm thêm 65ml nước nóng.\n4. Tốc độ nhỏ giọt lý tưởng là 1 giọt/giây, hoàn tất trong 4–5 phút để thu được cốt cà phê thơm đậm, sánh mượt.',
+      contentEn:
+        'Vietnamese Phin brewing is a mindful ritual. Start with 100% pure Medium-Dark roasted coffee such as ROAR Lion or Robusta S18.\n\n1. Pre-warm the Phin with hot water and dose 25g medium-coarse ground coffee.\n2. Bloom with 25ml water at 92–95°C for 30 seconds.\n3. Gently rest the gravity press and pour 65ml hot water.\n4. Aim for 1 drop per second over 4–5 minutes for syrupy body and lingering cacao sweetness.',
+      author: 'ROAR Head Barista',
+      readMinutes: 5,
+      imageKey: 'brewing-phin',
+    },
+    {
+      slug: 'hanh-trinh-arabica-cau-dat-1500m',
+      category: 'Origins',
+      tags: ['Cầu Đất', 'Arabica', 'Vùng trồng'],
+      titleVi: 'Cầu Đất 1.500m: Vì Sao Sương Mù Đà Lạt Tạo Nên Hạt Arabica Hương Hoa Trứ Danh?',
+      titleEn: 'Cầu Đất 1,500m: How Đà Lạt Mist Crafts Iconic Floral Arabica',
+      excerptVi: 'Khí hậu ôn đới quanh năm và biên độ nhiệt ngày – đêm lớn giúp quả cà phê chín chậm, tích tụ đường tự nhiên và axit trái cây thanh tao.',
+      excerptEn: 'Cool year-round temperatures and wide day-night swings slow cherry maturation, concentrating natural sugars and sparkling citrus acidity.',
+      contentVi:
+        'Nằm ở độ cao hơn 1.500m so với mực nước biển, cao nguyên Cầu Đất (Đà Lạt, Lâm Đồng) được ví như "thủ phủ Arabica" của Việt Nam. Nhiệt độ mát mẻ 15–22°C kéo dài thời gian chín của quả cà phê, giúp hạt chắc nặng và giàu hợp chất hương thơm.\n\nTại ROAR COFFEE®, các lô Arabica S18 và Arabica S18 CBU đều được thu hái chọn lọc quả chín đỏ trên 95%, sơ chế ướt (Full Washed) bằng nguồn nước suối sạch cao nguyên để giữ trọn nốt hương hoa nhài, cam chín và hậu vị mật ong thanh khiết.',
+      contentEn:
+        'Rising above 1,500m in Lâm Đồng, Cầu Đất is Vietnam’s premier Arabica terroir. Cool 15–22°C days slow cherry ripening, building dense beans rich in aromatic precursors.\n\nROAR COFFEE® selects 95%+ red-ripe cherries for our Arabica S18 and Arabica S18 CBU lots, washed cleanly to preserve jasmine blossom, ripe citrus, and honeyed sweetness.',
+      author: 'ROAR Sourcing Team',
+      readMinutes: 6,
+      imageKey: 'origin-highlands',
+    },
+    {
+      slug: 'phan-biet-natural-honey-va-cbu-washed',
+      category: 'Quality',
+      tags: ['CBU Washed', 'Honey', 'Natural', 'Chế biến'],
+      titleVi: 'Phân Biệt 3 Phương Pháp Chế Biến: Natural, Honey & Chế Biến Ướt (CBU)',
+      titleEn: 'Natural vs. Honey vs. Washed (CBU): How Processing Shapes Your Cup',
+      excerptVi: 'Cùng một giống hạt S18 nhưng phương pháp sơ chế quyết định tới 40% hương vị cuối cùng trong tách cà phê của bạn.',
+      excerptEn: 'Even from the same S18 harvest, post-harvest processing defines up to 40% of the final flavor profile in your cup.',
+      contentVi:
+        '• Chế biến khô (Natural): Phơi nguyên quả chín trên giàn lưới 18–25 ngày, tạo body dày, vị ngọt đậm và nốt trái cây chín nồng nàn.\n• Chế biến mật ong (Honey Process): Xát vỏ giữ lại lớp nhầy đường tự nhiên (mucilage) rồi phơi nắng kiểm soát, mang đến vị caramel mật ong cân bằng hoàn hảo.\n• Chế biến ướt (Full Washed / CBU): Lên men tách sạch lớp nhầy và rửa kỹ trước khi phơi, cho tách cà phê trong trẻo, hương sạch tinh khiết và hậu vị mượt mà — chuẩn mực của các dòng Espresso & Signature Reserve tại ROAR COFFEE®.',
+      contentEn:
+        '• Natural: Whole ripe cherries dried on raised beds for 18–25 days, producing heavy body and jammy fruit sweetness.\n• Honey Process: Pulped with natural mucilage intact for honeyed caramel balance.\n• Full Washed (CBU): Fermented and thoroughly washed for crisp clarity, clean aromatics, and silky finish — the backbone of ROAR Espresso & Signature Reserve.',
+      author: 'ROAR Q-Grader Lab',
+      readMinutes: 5,
+      imageKey: 'green-beans',
+    },
+    {
+      slug: 'bi-quyet-chon-hat-rang-s18-cho-quan-espresso',
+      category: 'B2B & HORECA',
+      tags: ['Hạt rang S18', 'Espresso', 'Quán cà phê', 'Giá sỉ kg'],
+      titleVi: 'Bí Quyết Chọn Hạt Rang S18 & Tối Ưu Cost Ly Cho Chủ Quán Espresso',
+      titleEn: 'Choosing Screen 18 Roasted Beans & Optimizing Espresso Bar Cost',
+      excerptVi: 'Cách phối trộn Robusta S18 CBU và Arabica S18 để đạt lớp crema dày hổ phách, vị cân bằng và tối ưu chi phí với bảng giá 5 bậc theo kg.',
+      excerptEn: 'How to blend Robusta S18 CBU and Arabica S18 for tiger-striped crema, balanced sweetness, and smart 5-tier kg wholesale margins.',
+      contentVi:
+        'Với các quán cà phê hiện đại, sự ổn định giữa các mẻ rang là yếu tố sống còn. Hạt rang chuẩn sàng 18 (7.1mm) của ROAR COFFEE® có kích thước đồng đều giúp quá trình rang chín đều từ tâm ra vỏ, hạn chế tối đa hạt cháy xém.\n\nGợi ý công thức phối trộn phổ biến cho quán:\n• Gu truyền thống / Cà phê sữa máy: 70% Robusta S18 CBU + 30% Arabica S18.\n• Gu hiện đại / Latte & Americano: 50% Arabica S18 CBU + 50% Robusta S18 Honey.\nVới bảng giá tự động 5 mức (1kg, 5–19kg, 20–49kg, 50–99kg và Sỉ ≥100kg), chủ quán dễ dàng dự toán chi phí nguyên liệu minh bạch ngay trên website.',
+      contentEn:
+        'Batch-to-batch consistency makes or breaks a café. ROAR Screen 18 (7.1mm) roasted beans ensure uniform heat transfer and zero scorching.\n\nPopular café blend ratios:\n• Classic Iced Milk Espresso: 70% Robusta S18 CBU + 30% Arabica S18.\n• Modern Latte & Americano: 50% Arabica S18 CBU + 50% Robusta S18 Honey.\nOur automatic 5-tier kg pricing (1kg up to ≥100kg wholesale) keeps your per-cup cost transparent and predictable.',
+      author: 'ROAR HORECA Advisory',
+      readMinutes: 6,
+      imageKey: 'hero-roast',
+    },
+    {
+      slug: '7-ca-tinh-roar-va-gu-thuong-thuc-cua-ban',
+      category: 'Culture',
+      tags: ['7 Cá tính', 'Signature Reserve', 'Gu uống'],
+      titleVi: '7 Cá Tính ROAR COFFEE®: Bạn Thuộc Gu Thưởng Thức Nào?',
+      titleEn: 'The 7 ROAR Personalities: Which Coffee Archetype Matches Your Palate?',
+      excerptVi: 'Từ bản lĩnh mạnh mẽ của Hổ & Sư Tử đến sự tinh tế của Cáo, Đại Bàng và đẳng cấp Báo Đen Signature Reserve.',
+      excerptEn: 'From the bold power of Tiger & Lion to the finesse of Fox, Eagle, and the obsidian prestige of Black Panther Signature Reserve.',
+      contentVi:
+        'Mỗi người uống cà phê đều mang một cá tính riêng biệt. Thay vì đặt tên kỹ thuật khô khan, ROAR COFFEE® khắc họa 7 biểu tượng linh thú gắn liền với từng hồ sơ hương vị:\n\n• Hổ (Tiger) & Sư Tử (Lion): Dành cho người yêu vị đậm bản lĩnh, pha Phin truyền thống và cà phê sữa đá.\n• Cáo (Fox) & Đại Bàng (Eagle): Thanh thoát, cân bằng, hương hoa trái tinh tế cho Espresso và Pour Over.\n• Sói (Wolf) & Cú Mèo (Owl): Tiện lợi, tỉnh táo tức thì cho nhịp sống bận rộn và sáng tạo đêm.\n• Báo Đen (Black Panther — Signature Reserve): Đỉnh cao phối trộn 60% Robusta – 20% Culi – 20% Arabica CBU cho những khoảnh khắc trang trọng.',
+      contentEn:
+        'Every coffee drinker carries a distinct rhythm. ROAR COFFEE® maps 7 wildlife archetypes directly to flavor profiles:\n\n• Tiger & Lion: Bold, commanding body for traditional Phin and iced milk coffee.\n• Fox & Eagle: Balanced, aromatic finesse for Espresso and Pour Over.\n• Wolf & Owl: Effortless clarity for busy mornings and late-night creators.\n• Black Panther (Signature Reserve): Our flagship 60% Robusta – 20% Culi – 20% Washed Arabica masterpiece.',
+      author: 'ROAR Editorial',
+      readMinutes: 4,
+      imageKey: 'signature-reserve',
+    },
+    {
+      slug: 'van-hoa-cold-brew-va-qua-tang-ca-phe-cao-cap',
+      category: 'Lifestyle',
+      tags: ['Cold Brew', 'Quà tặng', 'Gift Voucher'],
+      titleVi: 'Cold Brew 16 Giờ & Xu Hướng Quà Tặng Cà Phê Cao Cấp Cho Doanh Nghiệp',
+      titleEn: '16-Hour Cold Brew & The Rise of Executive Coffee Gifting',
+      excerptVi: 'Khám phá phương pháp ủ lạnh mượt mà ít đắng và cách chọn hộp quà Signature Reserve hoặc ROAR Gift Voucher cho đối tác.',
+      excerptEn: 'Discover smooth, low-acidity cold extraction alongside Signature Reserve canisters and ROAR Gift Vouchers for corporate gifting.',
+      contentVi:
+        'Ủ lạnh (Cold Brew) ở nhiệt độ mát trong 14–16 giờ giúp chiết xuất trọn vẹn vị ngọt tự nhiên và hương hoa trái của Arabica S18 mà giảm tới 60% độ chua gắt. Kết hợp cùng một lát cam vàng hoặc mật ong, đây là thức uống giải nhiệt tinh tế cho ngày làm việc năng suất.\n\nBên cạnh đó, xu hướng tặng quà doanh nghiệp đang dịch chuyển sang những trải nghiệm thưởng thức thực thụ: Hộp thiếc Signature Reserve đen huyền ép kim vàng hoặc Thẻ Quà Tặng ROAR Gift Voucher (50k – 100k – 500k – 1.000.000₫) giúp người nhận tự do chọn đúng gu cà phê yêu thích.',
+      contentEn:
+        'Steeping coarse Arabica S18 in cold filtered water for 14–16 hours unlocks velvety sweetness while reducing harsh acidity by up to 60%.\n\nMeanwhile, executive gifting is shifting toward experiential rituals: obsidian-and-gold Signature Reserve tins or ROAR Gift Vouchers (50k to 1,000,000 VND) let recipients choose their exact roast and brew style.',
+      author: 'ROAR Lifestyle Desk',
+      readMinutes: 5,
+      imageKey: 'origin-highlands',
+    },
+  ];
+
+  const checkJournal = db.prepare('SELECT id FROM journal_articles WHERE slug = ?');
+  const insertJournal = db.prepare(`
+    INSERT INTO journal_articles (slug, category, tags_json, title_vi, title_en, excerpt_vi, excerpt_en, content_vi, content_en, author, read_minutes, image_key, published)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+  `);
+  for (const a of extraJournalArticles) {
+    if (!checkJournal.get(a.slug)) {
+      insertJournal.run(
+        a.slug,
+        a.category,
+        JSON.stringify(a.tags),
+        a.titleVi,
+        a.titleEn,
+        a.excerptVi,
+        a.excerptEn,
+        a.contentVi,
+        a.contentEn,
+        a.author,
+        a.readMinutes,
+        a.imageKey
+      );
+    }
+  }
 }
 
 export function logAudit(

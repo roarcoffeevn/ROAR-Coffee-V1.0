@@ -96,6 +96,7 @@ export interface AuthUser {
     expired: number;
     expiringSoon: number;
   };
+  walletBalanceVnd?: number;
   unreadNotifications?: number;
 }
 

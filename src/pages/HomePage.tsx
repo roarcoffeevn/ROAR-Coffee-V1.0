@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Award, ChevronLeft, ChevronRight, Compass, Flame, Globe2, PackageCheck, Pause, Play } from 'lucide-react';
+import { ArrowRight, Award, ChevronDown, ChevronLeft, ChevronRight, Compass, Flame, Gift, Globe2, PackageCheck, Pause, Play, ShoppingBag } from 'lucide-react';
 import { AdaptiveLogo } from '../components/AdaptiveLogo';
 import { MediaImage } from '../components/MediaImage';
 import { VietnamOriginMap } from '../components/VietnamOriginMap';
@@ -131,6 +131,8 @@ export const HomePage: React.FC = () => {
   const { personalities, formatPrice, addToCart, showToast, theme } = useStore();
 
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
+  const [giftVouchers, setGiftVouchers] = useState<Product[]>([]);
+  const [giftOpen, setGiftOpen] = useState(false);
   const [articles, setArticles] = useState<any[]>([]);
   const [promotions, setPromotions] = useState<any[]>([]);
   const [heroIdx, setHeroIdx] = useState(0);
@@ -145,7 +147,10 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     fetchProductsWithFallback()
-      .then((list) => setFeaturedProducts(list.filter((p: Product) => p.category !== 'green_bean').slice(0, 4)))
+      .then((list) => {
+        setFeaturedProducts(list.filter((p: Product) => p.category !== 'green_bean' && p.sub_category !== 'Gift Voucher').slice(0, 4));
+        setGiftVouchers(list.filter((p: Product) => p.sub_category === 'Gift Voucher').sort((a: Product, b: Product) => a.price_vnd - b.price_vnd));
+      })
       .catch(() => {});
     fetchJournalWithFallback()
       .then((list) => setArticles(list.slice(0, 3)))
@@ -206,11 +211,11 @@ export const HomePage: React.FC = () => {
               </span>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 min-h-[144px] sm:min-h-[162px] flex flex-col justify-center">
               <p className="text-[11px] font-semibold tracking-[0.16em] uppercase text-[#C6A667]">
                 {lang === 'vi' ? activeSlide.badgeVi : activeSlide.badgeEn}
               </p>
-              <h1 className="text-[clamp(1.75rem,3.1vw,2.75rem)] leading-[1.12] font-bold tracking-tight text-balance">
+              <h1 className="text-[clamp(1.65rem,2.9vw,2.55rem)] leading-[1.14] font-bold tracking-tight text-balance line-clamp-2">
                 {lang === 'vi' ? activeSlide.titleVi : activeSlide.titleEn}
               </h1>
               <p className="text-xs sm:text-sm text-[#F8F5EF]/80 leading-relaxed max-w-xl line-clamp-3">
@@ -406,6 +411,103 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* COMPACT COLLAPSIBLE GIFT VOUCHER BAR (50k - 100k - 500k - 1M) */}
+      {giftVouchers.length > 0 && (
+        <section className="max-w-[1280px] mx-auto px-5 sm:px-6 pt-5">
+          <div className="rounded-xl border border-[#C6A667]/35 bg-white dark:bg-[#16221C] shadow-xs overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setGiftOpen((v) => !v)}
+              className="w-full px-4 sm:px-5 py-3 flex items-center justify-between gap-3 text-left hover:bg-[#F8F5EF]/70 dark:hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="w-8 h-8 rounded-lg bg-[#00552B] text-[#C6A667] flex items-center justify-center shrink-0">
+                  <Gift className="w-4 h-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-bold text-[#202020] dark:text-[#F1EFEA] truncate">
+                    {t('Thẻ Quà Tặng ROAR Gift Voucher (50k · 100k · 500k · 1.000.000₫)', 'ROAR Gift Vouchers (50k · 100k · 500k · 1,000,000 VND)')}
+                  </p>
+                  <p className="text-[11px] text-[#202020]/65 dark:text-[#F1EFEA]/65 truncate">
+                    {t('Bấm để mở danh sách Gift Voucher như sản phẩm · E-Voucher & Thẻ cứng ép kim', 'Click to expand Gift Voucher products · Digital E-Voucher & Foil Card')}
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#00552B] dark:text-[#C6A667] shrink-0">
+                <span className="hidden sm:inline">{giftOpen ? t('Thu gọn', 'Collapse') : t('Xem & Chọn mua', 'Expand')}</span>
+                <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${giftOpen ? 'rotate-180' : ''}`} />
+              </span>
+            </button>
+
+            {giftOpen && (
+              <div className="p-4 sm:p-5 border-t border-[#202020]/10 dark:border-white/10 bg-[#F8F5EF]/50 dark:bg-[#0E1512]/50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {giftVouchers.map((gv) => (
+                    <div
+                      key={gv.id}
+                      className="rounded-xl bg-white dark:bg-[#16221C] border border-[#00552B]/15 dark:border-[#C6A667]/25 overflow-hidden flex flex-col justify-between"
+                    >
+                      <div>
+                        <Link to={localePath(`/product/${gv.slug}`)} className="block relative aspect-[16/10] bg-[#003D25] overflow-hidden">
+                          <MediaImage
+                            imageKey={gv.image_key}
+                            alt={lang === 'en' ? gv.name_en : gv.name_vi}
+                            className="w-full h-full object-cover opacity-85 hover:scale-105 transition-transform duration-300"
+                          />
+                          <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-[#111111]/85 text-[#C6A667] font-mono text-[11px] font-bold">
+                            {formatPrice(gv.price_vnd, gv.price_usd)}
+                          </span>
+                        </Link>
+                        <div className="p-3 space-y-1.5">
+                          <Link
+                            to={localePath(`/product/${gv.slug}`)}
+                            className="block text-xs font-bold text-[#202020] dark:text-[#F1EFEA] hover:text-[#00552B] dark:hover:text-[#C6A667] line-clamp-2"
+                          >
+                            {lang === 'en' ? gv.name_en : gv.name_vi}
+                          </Link>
+                          <p className="text-[11px] text-[#202020]/70 dark:text-[#F1EFEA]/70 line-clamp-2 leading-relaxed">
+                            {lang === 'en' ? gv.subtitle_en || gv.description_en : gv.subtitle_vi || gv.description_vi}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="px-3 pb-3 pt-1 flex items-center gap-2">
+                        <Link
+                          to={localePath(`/product/${gv.slug}`)}
+                          className="flex-1 py-1.5 rounded-lg border border-[#00552B]/25 dark:border-[#C6A667]/30 text-center text-[11px] font-semibold text-[#00552B] dark:text-[#C6A667] hover:bg-[#00552B]/5"
+                        >
+                          {t('Chi tiết', 'Details')}
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstVar = gv.variants?.[0];
+                            addToCart({
+                              productId: gv.id,
+                              slug: gv.slug,
+                              sku: gv.sku,
+                              nameVi: gv.name_vi,
+                              nameEn: gv.name_en,
+                              variantLabel: firstVar?.label || 'E-Voucher',
+                              unitPriceVnd: gv.price_vnd,
+                              unitPriceUsd: gv.price_usd,
+                              quantity: 1,
+                              imageKey: gv.image_key,
+                            });
+                            showToast(t(`Đã thêm ${gv.name_vi} vào giỏ`, `Added ${gv.name_en} to cart`));
+                          }}
+                          className="flex-1 py-1.5 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white text-[11px] font-semibold inline-flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <ShoppingBag className="w-3 h-3" />
+                          <span>{t('Chọn mua', 'Add')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* 2. BRAND INTRODUCTION (with Official Vertical Logo) */}
       <section className="max-w-[1280px] mx-auto px-6 py-16 lg:py-20 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center border-b border-[#202020]/10 dark:border-white/10">

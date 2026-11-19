@@ -234,7 +234,7 @@ export const Footer: React.FC = () => {
       </div>
 
       {/* Bottom Legal + Language + Discreet CMS link */}
-      <div className="max-w-[1280px] mx-auto px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#F8F5EF]/60">
+      <div className="max-w-[1280px] mx-auto px-6 sm:pr-20 lg:pr-24 pt-5 pb-24 lg:pb-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#F8F5EF]/60">
         <p>© {new Date().getFullYear()} ROAR COFFEE®. {t('Bảo lưu mọi quyền.', 'All rights reserved.')}</p>
 
         <div className="flex items-center gap-5">

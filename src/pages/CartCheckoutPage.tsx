@@ -95,6 +95,34 @@ const PAYMENT_OPTIONS: PaymentMethodOption[] = [
     isQR: true,
   },
   {
+    id: 'wallet',
+    labelVi: 'Ví Thành viên ROAR (Thanh toán bằng số dư Ví)',
+    labelEn: 'ROAR Member Wallet (Pay with Wallet Balance)',
+    subVi: 'Trừ trực tiếp từ số dư Ví ROAR đã nạp (+10% đến +30% thưởng) · Xác nhận tức thì',
+    subEn: 'Instant deduction from your ROAR Member Wallet (+10% to +30% top-up bonus)',
+    accentColor: '#00552B',
+    badgeText: 'ROAR WALLET',
+    accountName: 'ROAR REWARDS WALLET',
+    accountNumber: '',
+    bankOrWalletVi: 'Ví Thành viên ROAR COFFEE®',
+    bankOrWalletEn: 'ROAR COFFEE® Member Wallet',
+    isQR: false,
+  },
+  {
+    id: 'points',
+    labelVi: 'Mua hàng bằng Điểm thưởng ROAR (Quy đổi 100% Điểm)',
+    labelEn: 'Pay 100% with ROAR Reward Points',
+    subVi: 'Quy đổi trực tiếp điểm tích lũy (1 điểm = 100₫) để thanh toán toàn bộ đơn hàng',
+    subEn: 'Redeem your accumulated reward points (1 pt = 100 VND) to cover the full order',
+    accentColor: '#C6A667',
+    badgeText: 'ROAR POINTS',
+    accountName: 'ROAR REWARDS POINTS',
+    accountNumber: '',
+    bankOrWalletVi: 'Điểm thưởng Thành viên ROAR COFFEE®',
+    bankOrWalletEn: 'ROAR COFFEE® Reward Points',
+    isQR: false,
+  },
+  {
     id: 'cod',
     labelVi: 'Thanh toán khi nhận hàng (COD)',
     labelEn: 'Cash on Delivery (COD)',
@@ -650,9 +678,42 @@ export const CheckoutPage: React.FC = () => {
               <h2 className="text-lg font-bold">{t('Phương thức Thanh toán', 'Payment Method')}</h2>
               <span className="text-xs text-[#00552B] dark:text-[#C6A667] font-medium flex items-center gap-1">
                 <QrCode className="w-3.5 h-3.5" />
-                <span>{t('VietQR · Ví điện tử · COD', 'VietQR · E-Wallets · COD')}</span>
+                <span>{t('VietQR · Ví ROAR · Điểm · COD', 'VietQR · ROAR Wallet · Points · COD')}</span>
               </span>
             </div>
+
+            {user && (
+              <div className="rounded-xl bg-[#003D25] text-white p-3.5 sm:p-4 border border-[#C6A667]/35 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-4">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-[#C6A667] font-semibold">
+                      {t('Số dư Ví ROAR hiện còn', 'ROAR Wallet Balance')}
+                    </p>
+                    <p className="text-base font-mono font-bold tabular-nums">
+                      {formatPrice(user.walletBalanceVnd || 0)}
+                    </p>
+                  </div>
+                  <div className="h-7 w-px bg-white/15 hidden sm:block" />
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-[#C6A667] font-semibold">
+                      {t('Điểm thưởng hiện còn', 'Available Reward Points')}
+                    </p>
+                    <p className="text-base font-mono font-bold tabular-nums">
+                      {(user.points?.available || 0).toLocaleString('vi-VN')} {t('điểm', 'pts')}{' '}
+                      <span className="text-[11px] font-normal text-[#F8F5EF]/75">
+                        (≈ {formatPrice((user.points?.available || 0) * 100)})
+                      </span>
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  to={localePath('/account?tab=wallet')}
+                  className="px-3 py-1.5 rounded-lg bg-[#C6A667] hover:bg-[#b59454] text-[#111111] font-bold text-[11px] shrink-0"
+                >
+                  {t('+ Nạp Ví (+10%–30%)', '+ Top Up Wallet')}
+                </Link>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {PAYMENT_OPTIONS.map((opt) => {

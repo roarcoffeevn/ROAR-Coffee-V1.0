@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { AdminWalletPointsPanel } from '../components/AdminWalletPointsPanel';
 import {
   Archive,
   Bell,
@@ -1897,6 +1898,8 @@ export const AdminCmsPage: React.FC = () => {
                 </form>
               )}
 
+              <AdminWalletPointsPanel onGoProducts={() => selectSection('products')} />
+
               {/* Mobile Compact Customer Cards */}
               <div className="md:hidden bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
                 {customers.map((c) => (
@@ -1909,7 +1912,8 @@ export const AdminCmsPage: React.FC = () => {
                         </p>
                       </div>
                       <div className="text-right shrink-0 font-mono tabular-nums">
-                        <span className="font-bold text-[#00552B] block">{c.points.available} pts</span>
+                        <span className="font-bold text-[#00552B] block">{Number(c.wallet_balance_vnd || 0).toLocaleString('vi-VN')} ₫</span>
+                        <span className="text-[11px] font-semibold text-amber-600 block">{c.points.available} pts</span>
                         <span className="text-[10px] text-slate-500">{c.orderCount || 0} {t('đơn', 'ord')}</span>
                       </div>
                     </div>
@@ -1963,6 +1967,7 @@ export const AdminCmsPage: React.FC = () => {
                       <th className="p-3 text-left">{t('Họ tên & Email', 'Customer')}</th>
                       <th className="p-3 text-right">{t('Đơn hàng & Tổng chi', 'Orders & Spend')}</th>
                       <th className="p-3 text-left">{t('Hạng thành viên', 'Tier')}</th>
+                      <th className="p-3 text-right">{t('Số dư Ví ROAR', 'ROAR Wallet')}</th>
                       <th className="p-3 text-right">{t('Điểm khả dụng', 'Available Pts')}</th>
                       <th className="p-3 text-right">{t('Thao tác & Thông báo', 'Actions & Notify')}</th>
                     </tr>
@@ -2004,6 +2009,9 @@ export const AdminCmsPage: React.FC = () => {
                             ))}
                           </select>
                         </td>
+                        <td className="p-3 text-right font-mono font-bold text-[#00552B] tabular-nums whitespace-nowrap">
+                          {Number(c.wallet_balance_vnd || 0).toLocaleString('vi-VN')} ₫
+                        </td>
                         <td className="p-3 text-right font-mono font-bold tabular-nums">{c.points.available}</td>
                         <td className="p-3 text-right whitespace-nowrap space-x-1.5">
                           <button
@@ -2038,9 +2046,10 @@ export const AdminCmsPage: React.FC = () => {
             </div>
           )}
 
-          {/* 7. PROMOTIONS (KHUYẾN MÃI) */}
+          {/* 7. PROMOTIONS, VOUCHERS, WALLET & POINTS */}
           {resolvedSection === 'promotions' && hasAdminPermission(user, 'promotions') && (
             <div className="space-y-3.5 sm:space-y-5">
+              <AdminWalletPointsPanel onGoProducts={() => selectSection('products')} />
               <form
                 onSubmit={createPromo}
                 className="bg-white p-3.5 sm:p-5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-6 gap-2.5 sm:gap-3 text-xs items-end"

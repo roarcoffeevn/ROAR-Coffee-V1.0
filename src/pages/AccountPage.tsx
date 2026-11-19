@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Award, Bell, CheckCheck, Copy, Gift, LogOut, RefreshCw, Shield, Tag, UserCheck } from 'lucide-react';
+import { Award, Bell, CheckCheck, Copy, Gift, LogOut, PlusCircle, QrCode, RefreshCw, Shield, Sparkles, Tag, UserCheck, Wallet, X } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { useStore } from '../context/StoreContext';
 import { localizeLedgerEntry, localizeOrderStatus, localizePaymentStatus, localizeVariantLabel } from '../lib/i18nHelpers';
@@ -27,11 +27,36 @@ export const AccountPage: React.FC = () => {
   const [socialLoading, setSocialLoading] = useState(false);
 
   const initialTab = (searchParams.get('tab') as any) || 'dashboard';
-  const [tab, setTab] = useState<'dashboard' | 'notifications' | 'vouchers' | 'orders' | 'rewards' | 'profile'>(
-    ['dashboard', 'notifications', 'vouchers', 'orders', 'rewards', 'profile'].includes(initialTab) ? initialTab : 'dashboard'
+  const [tab, setTab] = useState<'dashboard' | 'wallet' | 'notifications' | 'vouchers' | 'orders' | 'rewards' | 'profile'>(
+    ['dashboard', 'wallet', 'notifications', 'vouchers', 'orders', 'rewards', 'profile'].includes(initialTab) ? initialTab : 'dashboard'
   );
   const [notifFilter, setNotifFilter] = useState<'all' | 'unread' | 'order' | 'promo'>('all');
   const [dash, setDash] = useState<any>(null);
+  const [walletData, setWalletData] = useState<any>(null);
+  const [customTopup, setCustomTopup] = useState('500000');
+  const [topupLoading, setTopupLoading] = useState(false);
+  const [pendingTopup, setPendingTopup] = useState<{
+    amountVnd: number;
+    bonusPct: number;
+    bonusVnd: number;
+    totalCreditVnd: number;
+    bonusPoints: number;
+    refCode: string;
+  } | null>(null);
+
+  const openTopupQr = (amountVnd: number) => {
+    const clean = Math.floor(Number(amountVnd || 0));
+    if (!Number.isFinite(clean) || clean < 50000) {
+      showToast(t('Số tiền nạp tối thiểu là 50.000₫', 'Minimum top-up amount is 50,000 VND'));
+      return;
+    }
+    const bonusPct = clean >= 2000000 ? 30 : clean >= 1000000 ? 20 : clean >= 500000 ? 15 : 10;
+    const bonusVnd = Math.round((clean * bonusPct) / 100);
+    const totalCreditVnd = clean + bonusVnd;
+    const bonusPoints = Math.floor(totalCreditVnd / 10000);
+    const refCode = `ROAR-${(user?.memberCode || 'MEM').replace(/[^A-Z0-9]/gi, '').slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    setPendingTopup({ amountVnd: clean, bonusPct, bonusVnd, totalCreditVnd, bonusPoints, refCode });
+  };
 
   // Profile edit state
   const [editName, setEditName] = useState('');
@@ -40,6 +65,40 @@ export const AccountPage: React.FC = () => {
   const [newAddressLine, setNewAddressLine] = useState('');
   const [currPass, setCurrPass] = useState('');
   const [nextPass, setNextPass] = useState('');
+
+  const loadWallet = async () => {
+    if (!user) return;
+    const res = await apiFetch('/api/wallet');
+    if (res.ok) {
+      setWalletData(await res.json());
+    }
+  };
+
+  const handleWalletTopup = async (amountVnd: number) => {
+    if (!amountVnd || amountVnd < 50000 || topupLoading) return;
+    setTopupLoading(true);
+    try {
+      const res = await apiFetch('/api/wallet/topup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountVnd }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast(
+          t(
+            `Nạp thành công ${amountVnd.toLocaleString('vi-VN')}₫ (+${d.bonusPct}% thưởng = ${Number(d.totalCreditVnd || amountVnd).toLocaleString('vi-VN')}₫ vào Ví & +${d.pointsDelta || 0} điểm)`,
+            `Topped up ${amountVnd.toLocaleString('vi-VN')} VND (+${d.bonusPct}% bonus credited & +${d.pointsDelta || 0} pts)`
+          )
+        );
+        await Promise.all([loadWallet(), loadDashboard(), refreshUser()]);
+      } else {
+        showToast(d.error || t('Không thể nạp ví lúc này', 'Unable to top up wallet right now'));
+      }
+    } finally {
+      setTopupLoading(false);
+    }
+  };
 
   const loadDashboard = async () => {
     if (!user) return;
@@ -54,7 +113,7 @@ export const AccountPage: React.FC = () => {
 
   useEffect(() => {
     const qTab = searchParams.get('tab');
-    if (qTab && ['dashboard', 'notifications', 'vouchers', 'orders', 'rewards', 'profile'].includes(qTab)) {
+    if (qTab && ['dashboard', 'wallet', 'notifications', 'vouchers', 'orders', 'rewards', 'profile'].includes(qTab)) {
       setTab(qTab as any);
     }
   }, [searchParams]);
@@ -65,8 +124,13 @@ export const AccountPage: React.FC = () => {
   };
 
   useEffect(() => {
-    if (user) loadDashboard();
-    else setDash(null);
+    if (user) {
+      loadDashboard();
+      loadWallet();
+    } else {
+      setDash(null);
+      setWalletData(null);
+    }
   }, [user]);
 
   const markNotificationsRead = async (notificationId?: number) => {
@@ -581,6 +645,7 @@ export const AccountPage: React.FC = () => {
       <div className="flex flex-wrap gap-2 border-b border-[#202020]/10 dark:border-white/10 pb-3">
         {[
           { id: 'dashboard', vi: 'Tổng quan', en: 'Dashboard' },
+          { id: 'wallet', vi: 'Ví ROAR & Nạp tiền', en: 'ROAR Wallet' },
           { id: 'notifications', vi: 'Thông báo', en: 'Notifications', badge: unreadCount },
           { id: 'vouchers', vi: 'Ưu đãi & Voucher', en: 'Offers & Vouchers', badge: dash?.activeVouchers?.length },
           { id: 'orders', vi: 'Đơn hàng', en: 'Orders' },
@@ -943,6 +1008,252 @@ export const AccountPage: React.FC = () => {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {tab === 'wallet' && (
+        <div className="space-y-6">
+          {/* Starbucks-Style Digital ROAR Member Wallet Card */}
+          <div className="rounded-2xl bg-gradient-to-br from-[#003D25] via-[#00552B] to-[#0E1512] text-white p-6 sm:p-8 border border-[#C6A667]/40 shadow-xl relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+              <div>
+                <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[#C6A667] font-semibold">
+                  <Wallet className="w-4 h-4" />
+                  <span>{t('VÍ THÀNH VIÊN ROAR REWARDS', 'ROAR REWARDS MEMBER WALLET')}</span>
+                </div>
+                <p className="text-3xl sm:text-4xl font-mono font-bold text-white mt-2 tabular-nums">
+                  {formatPrice(walletData?.walletBalanceVnd ?? user.walletBalanceVnd ?? 0)}
+                </p>
+                <p className="text-xs text-[#F8F5EF]/75 mt-1">
+                  {t(
+                    `Điểm thưởng hiện có: ${(walletData?.points?.available ?? user.points?.available ?? 0).toLocaleString()} điểm · Hạng ${user.tier}`,
+                    `Available points: ${(walletData?.points?.available ?? user.points?.available ?? 0).toLocaleString()} pts · ${user.tier}`
+                  )}
+                </p>
+              </div>
+              <div className="sm:text-right space-y-1">
+                <p className="text-xs text-[#C6A667] font-mono">{user.memberCode}</p>
+                <p className="text-sm font-semibold">{user.fullName}</p>
+                <Link
+                  to={localePath('/checkout')}
+                  className="inline-flex items-center gap-1.5 mt-2 px-3.5 py-2 rounded-lg bg-[#C6A667] hover:bg-[#b59454] text-[#111111] text-xs font-bold"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{t('Dùng Ví thanh toán ngay', 'Pay with Wallet')}</span>
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* 4 Top-up Packages (+10% to +30% Bonus) */}
+          <div className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-4">
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-[#202020] dark:text-[#F1EFEA] flex items-center gap-2">
+                <PlusCircle className="w-5 h-5 text-[#00552B] dark:text-[#C6A667]" />
+                {t('Nạp tiền vào Ví — Tặng thưởng ngay +10% đến +30%', 'Top Up Wallet — Instant +10% to +30% Bonus')}
+              </h2>
+              <p className="text-xs text-[#202020]/70 dark:text-[#F1EFEA]/70 mt-1">
+                {t(
+                  'Chọn mệnh giá nạp để được cộng thêm 10% – 30% giá trị vào Ví ROAR và tích điểm thưởng mua hàng như thành viên Starbucks.',
+                  'Choose a top-up pack to receive an instant +10% to +30% bonus credit plus reward points for every purchase.'
+                )}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {(
+                walletData?.packages || [
+                  { amountVnd: 100000, bonusPct: 10, bonusVnd: 10000, totalCreditVnd: 110000, bonusPoints: 11, labelVi: 'Gói Khởi Động · +10%', labelEn: 'Starter · +10%' },
+                  { amountVnd: 500000, bonusPct: 15, bonusVnd: 75000, totalCreditVnd: 575000, bonusPoints: 57, labelVi: 'Gói Thành Viên · +15%', labelEn: 'Member · +15%' },
+                  { amountVnd: 1000000, bonusPct: 20, bonusVnd: 200000, totalCreditVnd: 1200000, bonusPoints: 120, labelVi: 'Gói Gold · +20%', labelEn: 'Gold · +20%' },
+                  { amountVnd: 2000000, bonusPct: 30, bonusVnd: 600000, totalCreditVnd: 2600000, bonusPoints: 260, labelVi: 'Gói Reserve VIP · +30%', labelEn: 'Reserve VIP · +30%' },
+                ]
+              ).map((pkg: any) => (
+                <div
+                  key={pkg.amountVnd}
+                  className="p-4 rounded-xl border border-[#00552B]/20 dark:border-[#C6A667]/30 bg-[#F8F5EF] dark:bg-[#0E1512] flex flex-col justify-between gap-3"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-[#00552B] dark:text-[#C6A667]">
+                        {lang === 'en' ? pkg.labelEn : pkg.labelVi}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-[#C6A667] text-[#111111] text-[10px] font-extrabold">
+                        +{pkg.bonusPct}%
+                      </span>
+                    </div>
+                    <p className="text-lg font-mono font-bold text-[#202020] dark:text-[#F1EFEA] mt-2 tabular-nums">
+                      {formatPrice(pkg.amountVnd)}
+                    </p>
+                    <p className="text-[11px] text-[#00552B] dark:text-[#C6A667] font-semibold mt-0.5">
+                      {t(
+                        `Nhận ${formatPrice(pkg.totalCreditVnd)} + ${pkg.bonusPoints} điểm`,
+                        `Get ${formatPrice(pkg.totalCreditVnd)} + ${pkg.bonusPoints} pts`
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={topupLoading}
+                    onClick={() => openTopupQr(pkg.amountVnd)}
+                    className="w-full py-2 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>{t('Quét QR nạp gói này', 'Pay via QR')}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Custom Top-up Amount */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                openTopupQr(Number(customTopup));
+              }}
+              className="pt-3 border-t border-[#202020]/10 dark:border-white/10 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
+            >
+              <input
+                type="number"
+                min={50000}
+                step={50000}
+                value={customTopup}
+                onChange={(e) => setCustomTopup(e.target.value)}
+                placeholder={t('Nhập số tiền nạp khác (tối thiểu 50.000₫)', 'Enter custom amount (min 50,000 VND)')}
+                className="flex-1 px-3.5 py-2.5 rounded-lg border border-[#202020]/15 dark:border-white/15 bg-[#F8F5EF] dark:bg-[#0E1512] text-xs font-mono"
+              />
+              <button
+                type="submit"
+                disabled={topupLoading}
+                className="px-5 py-2.5 rounded-lg bg-[#C6A667] hover:bg-[#b59454] text-[#111111] text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>{t('Tạo mã QR nạp Ví', 'Generate Top-up QR')}</span>
+              </button>
+            </form>
+          </div>
+
+          {/* VietQR Top-Up Modal */}
+          {pendingTopup && (
+            <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-[#16221C] border border-[#00552B]/25 dark:border-[#C6A667]/35 rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <QrCode className="w-5 h-5 text-[#00552B] dark:text-[#C6A667]" />
+                    <h3 className="text-sm sm:text-base font-bold text-[#202020] dark:text-[#F1EFEA]">
+                      {t('Quét mã VietQR để Nạp Ví ROAR', 'Scan VietQR to Top Up ROAR Wallet')}
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendingTopup(null)}
+                    className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex flex-col items-center bg-[#F8F5EF] dark:bg-[#0E1512] rounded-xl p-4 border border-[#202020]/10 dark:border-white/10">
+                  <img
+                    src={`https://img.vietqr.io/image/VCB-102866889999-compact2.png?amount=${pendingTopup.amountVnd}&addInfo=${encodeURIComponent(pendingTopup.refCode)}&accountName=${encodeURIComponent('ROAR COFFEE VIETNAM')}`}
+                    alt="VietQR Top-up"
+                    className="w-52 h-52 object-contain rounded-lg bg-white p-1.5 shadow-sm"
+                  />
+                  <div className="mt-3 text-center text-xs space-y-1">
+                    <p className="font-bold text-[#202020] dark:text-[#F1EFEA]">Vietcombank · STK: <span className="font-mono">1028 6688 9999</span></p>
+                    <p className="text-[#202020]/70 dark:text-[#F1EFEA]/70">ROAR COFFEE VIETNAM</p>
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white dark:bg-[#16221C] border border-[#202020]/15 dark:border-white/15 font-mono text-[11px]">
+                      <span>{t('Nội dung CK:', 'Ref:')} <strong>{pendingTopup.refCode}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(pendingTopup.refCode);
+                          showToast(t('Đã sao chép nội dung chuyển khoản', 'Copied transfer reference'));
+                        }}
+                        className="text-[#00552B] dark:text-[#C6A667] cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-[#00552B]/8 dark:bg-[#C6A667]/10 border border-[#00552B]/20 dark:border-[#C6A667]/25 p-3 text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-[#202020]/70 dark:text-[#F1EFEA]/70">{t('Số tiền chuyển khoản:', 'Transfer amount:')}</span>
+                    <span className="font-mono font-bold">{formatPrice(pendingTopup.amountVnd)}</span>
+                  </div>
+                  <div className="flex justify-between text-[#00552B] dark:text-[#C6A667]">
+                    <span>{t(`Thưởng gói nạp (+${pendingTopup.bonusPct}%):`, `Bonus (+${pendingTopup.bonusPct}%):`)}</span>
+                    <span className="font-mono font-bold">+{formatPrice(pendingTopup.bonusVnd)}</span>
+                  </div>
+                  <div className="flex justify-between pt-1 border-t border-[#202020]/10 dark:border-white/10 font-bold">
+                    <span>{t('Tổng cộng vào Ví & Điểm:', 'Total Credited:')}</span>
+                    <span className="font-mono text-[#00552B] dark:text-[#C6A667]">
+                      {formatPrice(pendingTopup.totalCreditVnd)} (+{pendingTopup.bonusPoints} {t('điểm', 'pts')})
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingTopup(null)}
+                    className="flex-1 py-2.5 rounded-lg border border-[#202020]/15 dark:border-white/15 text-xs font-semibold cursor-pointer"
+                  >
+                    {t('Đóng', 'Cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={topupLoading}
+                    onClick={async () => {
+                      const amt = pendingTopup.amountVnd;
+                      await handleWalletTopup(amt);
+                      setPendingTopup(null);
+                    }}
+                    className="flex-[2] py-2.5 rounded-lg bg-[#00552B] hover:bg-[#003D25] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {topupLoading ? t('Đang xác nhận...', 'Confirming...') : t('Xác nhận đã chuyển khoản', 'Confirm Transfer & Credit Wallet')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Wallet Transaction History */}
+          <div className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-3">
+            <h3 className="text-sm font-bold text-[#202020] dark:text-[#F1EFEA]">
+              {t('Lịch sử giao dịch Ví ROAR', 'ROAR Wallet Transaction History')}
+            </h3>
+            {!walletData?.transactions?.length ? (
+              <p className="text-xs text-[#202020]/60 dark:text-[#F1EFEA]/60">
+                {t('Chưa có giao dịch nào. Nạp gói đầu tiên để nhận ngay +10% đến +30% thưởng nhé!', 'No transactions yet. Top up your first pack for +10% to +30% bonus!')}
+              </p>
+            ) : (
+              <div className="divide-y divide-[#202020]/10 dark:divide-white/10">
+                {walletData.transactions.map((tx: any) => (
+                  <div key={tx.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <div>
+                      <p className="font-semibold text-[#202020] dark:text-[#F1EFEA]">{tx.note}</p>
+                      <p className="text-[11px] text-[#202020]/55 dark:text-[#F1EFEA]/55 font-mono">
+                        {tx.reference_code} · {tx.created_at}
+                      </p>
+                    </div>
+                    <div className="text-right font-mono shrink-0">
+                      <p className={`font-bold ${tx.tx_type === 'spend' ? 'text-rose-600 dark:text-rose-400' : 'text-[#00552B] dark:text-[#C6A667]'}`}>
+                        {tx.tx_type === 'spend'
+                          ? `-${formatPrice(Math.abs(tx.amount_vnd))}`
+                          : `+${formatPrice(tx.amount_vnd + (tx.bonus_vnd || 0))}`}
+                      </p>
+                      {tx.points_delta > 0 && (
+                        <p className="text-[10px] text-[#C6A667]">+{tx.points_delta} {t('điểm', 'pts')}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
