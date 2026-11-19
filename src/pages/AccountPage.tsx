@@ -4,6 +4,8 @@ import { Award, Bell, CheckCheck, Copy, Gift, LogOut, PlusCircle, QrCode, Refres
 import { useI18n } from '../i18n/I18nContext';
 import { useStore } from '../context/StoreContext';
 import { localizeLedgerEntry, localizeOrderStatus, localizePaymentStatus, localizeVariantLabel } from '../lib/i18nHelpers';
+import { MembershipTierVisualizer } from '../components/MembershipTierVisualizer';
+import { DailyCheckinGame } from '../components/DailyCheckinGame';
 
 export const AccountPage: React.FC = () => {
   const { lang, t, localePath } = useI18n();
@@ -1259,6 +1261,14 @@ export const AccountPage: React.FC = () => {
 
       {tab === 'rewards' && dash && (
         <div className="space-y-8">
+          <DailyCheckinGame onRewardClaimed={loadDashboard} />
+          <MembershipTierVisualizer
+            currentTierName={user.tier}
+            lifetimeSpendVnd={(dash.orders || [])
+              .filter((o: any) => o.order_status !== 'Cancelled')
+              .reduce((sum: number, o: any) => sum + Number(o.total || 0), 0)}
+            lifetimePoints={Number(dash.points?.available || 0) + Number(dash.points?.redeemed || 0)}
+          />
           <div className="bg-white dark:bg-[#16221C] rounded-xl border border-[#202020]/10 dark:border-white/10 p-6 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold flex items-center gap-2"><Award className="w-5 h-5 text-[#00552B] dark:text-[#C6A667]" /> {t('ĐIỂM THƯỞNG ROAR', 'ROAR REWARDS')}</h2>

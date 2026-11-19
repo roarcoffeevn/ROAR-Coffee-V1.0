@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Expand, Heart, ShieldAlert, Star, X } from 'lucide-react';
 import { B2BInquiryModal } from '../components/B2BInquiryModal';
+import { RecentlyViewedStrip, recordRecentlyViewed } from '../components/RecentlyViewedStrip';
 import { MediaImage } from '../components/MediaImage';
 import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
@@ -50,6 +51,7 @@ export const ProductDetailPage: React.FC = () => {
           return;
         }
         setProduct(d.product);
+        recordRecentlyViewed(d.product);
         setReviews(d.reviews || []);
         setRelated(d.related || []);
         setSelectedVariantIdx(0);
@@ -740,6 +742,8 @@ export const ProductDetailPage: React.FC = () => {
           </div>
         </section>
       )}
+
+      <RecentlyViewedStrip excludeSlug={product.slug} />
 
       <B2BInquiryModal
         open={b2bOpen}

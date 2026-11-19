@@ -416,29 +416,39 @@ export const HomePage: React.FC = () => {
       {giftVouchers.length > 0 && (
         <section className="max-w-[1280px] mx-auto px-5 sm:px-6 pt-5">
           <div className="rounded-xl border border-[#C6A667]/35 bg-white dark:bg-[#16221C] shadow-xs overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setGiftOpen((v) => !v)}
-              className="w-full px-4 sm:px-5 py-3 flex items-center justify-between gap-3 text-left hover:bg-[#F8F5EF]/70 dark:hover:bg-white/5 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="w-8 h-8 rounded-lg bg-[#00552B] text-[#C6A667] flex items-center justify-center shrink-0">
-                  <Gift className="w-4 h-4" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-xs sm:text-sm font-bold text-[#202020] dark:text-[#F1EFEA] truncate">
-                    {t('Thẻ Quà Tặng ROAR Gift Voucher (50k · 100k · 500k · 1.000.000₫)', 'ROAR Gift Vouchers (50k · 100k · 500k · 1,000,000 VND)')}
-                  </p>
-                  <p className="text-[11px] text-[#202020]/65 dark:text-[#F1EFEA]/65 truncate">
-                    {t('Bấm để mở danh sách Gift Voucher như sản phẩm · E-Voucher & Thẻ cứng ép kim', 'Click to expand Gift Voucher products · Digital E-Voucher & Foil Card')}
-                  </p>
+            <div className="px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setGiftOpen((v) => !v)}
+                className="flex-1 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-opacity cursor-pointer min-w-[240px]"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-8 h-8 rounded-lg bg-[#00552B] text-[#C6A667] flex items-center justify-center shrink-0">
+                    <Gift className="w-4 h-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-[#202020] dark:text-[#F1EFEA] truncate">
+                      {t('Thẻ Quà Tặng ROAR Gift Voucher (50k · 100k · 500k · 1.000.000₫)', 'ROAR Gift Vouchers (50k · 100k · 500k · 1,000,000 VND)')}
+                    </p>
+                    <p className="text-[11px] text-[#202020]/65 dark:text-[#F1EFEA]/65 truncate">
+                      {t('Bấm để mở danh sách Gift Voucher như sản phẩm · E-Voucher & Thẻ cứng ép kim', 'Click to expand Gift Voucher products · Digital E-Voucher & Foil Card')}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#00552B] dark:text-[#C6A667] shrink-0">
-                <span className="hidden sm:inline">{giftOpen ? t('Thu gọn', 'Collapse') : t('Xem & Chọn mua', 'Expand')}</span>
-                <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${giftOpen ? 'rotate-180' : ''}`} />
-              </span>
-            </button>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#00552B] dark:text-[#C6A667] shrink-0">
+                  <span className="hidden sm:inline">{giftOpen ? t('Thu gọn', 'Collapse') : t('Xem Voucher', 'Expand')}</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${giftOpen ? 'rotate-180' : ''}`} />
+                </span>
+              </button>
+
+              <Link
+                to={localePath('/account?tab=rewards')}
+                className="px-3.5 py-2 rounded-lg bg-[#C6A667] hover:bg-[#b59454] text-[#111111] text-xs font-bold inline-flex items-center gap-1.5 shrink-0 transition-colors"
+              >
+                <Award className="w-3.5 h-3.5" />
+                <span>{t('Điểm danh nhận quà (+100đ)', 'Daily Check-in (+100 pts)')}</span>
+              </Link>
+            </div>
 
             {giftOpen && (
               <div className="p-4 sm:p-5 border-t border-[#202020]/10 dark:border-white/10 bg-[#F8F5EF]/50 dark:bg-[#0E1512]/50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Heart, Search } from 'lucide-react';
 import { MediaImage } from '../components/MediaImage';
+import { RecentlyViewedStrip } from '../components/RecentlyViewedStrip';
 import { useI18n } from '../i18n/I18nContext';
 import { type Product, useStore } from '../context/StoreContext';
 import { localizeCoffeeType } from '../lib/i18nHelpers';
@@ -366,6 +367,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({ defaultCategory = 'all' }) =
           })}
         </div>
       )}
+      <RecentlyViewedStrip />
     </div>
   );
 };

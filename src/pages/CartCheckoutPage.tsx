@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Banknote, Check, CheckCircle2, Copy, Minus, Plus, QrCode, ShieldCheck, Smartphone, Tag, Trash2, Wallet } from 'lucide-react';
 import { MediaImage } from '../components/MediaImage';
+import { RecentlyViewedStrip } from '../components/RecentlyViewedStrip';
 import { useI18n } from '../i18n/I18nContext';
 import { useStore } from '../context/StoreContext';
 import { localizeOrderStatus, localizeVariantLabel } from '../lib/i18nHelpers';
@@ -779,6 +780,96 @@ export const CheckoutPage: React.FC = () => {
           </div>
 
           <div className="space-y-2.5">
+            {/* Dynamic Upsell & Discount Milestone Status Bar */}
+            {availablePromos.length > 0 && (() => {
+              const milestones = [...availablePromos]
+                .filter((p) => Number(p.min_order_value || 0) > 0)
+                .sort((a, b) => Number(a.min_order_value || 0) - Number(b.min_order_value || 0));
+              if (milestones.length === 0) return null;
+
+              const formatBenefit = (p: any) => {
+                if (p.discount_type === 'percent') return t(`Giảm ${p.discount_value}%`, `${p.discount_value}% OFF`);
+                if (p.discount_type === 'free_shipping') return t('Miễn phí vận chuyển', 'Free Shipping');
+                return t(`Giảm ${formatPrice(Number(p.discount_value || 0))}`, `Save ${formatPrice(Number(p.discount_value || 0))}`);
+              };
+
+              const nextPromo = milestones.find((p) => cartSubtotalVnd < Number(p.min_order_value || 0));
+              const bestUnlocked = [...milestones].reverse().find((p) => cartSubtotalVnd >= Number(p.min_order_value || 0));
+              const targetVal = nextPromo ? Number(nextPromo.min_order_value) : Number(milestones[milestones.length - 1].min_order_value);
+              const pct = Math.min(100, Math.max(4, Math.round((cartSubtotalVnd / Math.max(1, targetVal)) * 100)));
+              const remaining = nextPromo ? Math.max(0, Number(nextPromo.min_order_value) - cartSubtotalVnd) : 0;
+
+              return (
+                <div className="rounded-xl bg-gradient-to-r from-[#00552B]/10 via-[#C6A667]/12 to-[#00552B]/10 dark:from-[#00552B]/30 dark:via-[#C6A667]/15 dark:to-[#00552B]/30 border border-[#00552B]/20 dark:border-[#C6A667]/30 p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2 text-xs">
+                    {nextPromo ? (
+                      <p className="text-[#202020] dark:text-[#F1EFEA] leading-snug">
+                        {t('Mua thêm ', 'Add ')}
+                        <strong className="font-mono text-[#00552B] dark:text-[#C6A667]">{formatPrice(remaining)}</strong>
+                        {t(' để mở khóa ưu đãi ', ' to unlock ')}
+                        <strong className="text-[#00552B] dark:text-[#C6A667]">{formatBenefit(nextPromo)}</strong>
+                        <span className="text-[11px] opacity-75"> ({nextPromo.code})</span>
+                      </p>
+                    ) : (
+                      <p className="text-[#00552B] dark:text-[#C6A667] font-semibold leading-snug">
+                        {t(
+                          `Chúc mừng! Bạn đã đạt mốc ưu đãi cao nhất (${formatBenefit(bestUnlocked)})`,
+                          `Unlocked! Your order qualifies for our highest offer (${formatBenefit(bestUnlocked)})`
+                        )}
+                      </p>
+                    )}
+                    {nextPromo ? (
+                      <Link
+                        to={localePath('/shop')}
+                        className="px-2 py-1 rounded bg-[#00552B] text-white text-[10px] font-bold whitespace-nowrap shrink-0 hover:bg-[#003D25]"
+                      >
+                        {t('+ Mua thêm', '+ Add More')}
+                      </Link>
+                    ) : bestUnlocked ? (
+                      <button
+                        type="button"
+                        onClick={() => applyVoucher(bestUnlocked.code)}
+                        className="px-2 py-1 rounded bg-[#C6A667] text-[#111111] text-[10px] font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                      >
+                        {t('Áp dụng ngay', 'Apply Now')}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {/* Progress Track */}
+                  <div className="space-y-1">
+                    <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-[#00552B] via-[#007a3d] to-[#C6A667] transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {milestones.slice(0, 4).map((m) => {
+                        const unlocked = cartSubtotalVnd >= Number(m.min_order_value || 0);
+                        return (
+                          <button
+                            key={m.code}
+                            type="button"
+                            disabled={!unlocked}
+                            onClick={() => unlocked && applyVoucher(m.code)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                              unlocked
+                                ? 'bg-[#00552B] text-white font-semibold cursor-pointer hover:bg-[#003D25]'
+                                : 'bg-white/70 dark:bg-black/25 text-[#202020]/60 dark:text-[#F1EFEA]/60 border border-[#202020]/10 dark:border-white/10'
+                            }`}
+                          >
+                            {unlocked ? '✓ ' : ''}
+                            {formatPrice(Number(m.min_order_value))} · {formatBenefit(m)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="flex gap-2">
               <input
                 type="text"
@@ -944,6 +1035,7 @@ export const CheckoutPage: React.FC = () => {
           </p>
         </div>
       </form>
+      <RecentlyViewedStrip />
     </div>
   );
 };

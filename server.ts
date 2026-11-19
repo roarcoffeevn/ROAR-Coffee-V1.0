@@ -800,6 +800,92 @@ app.post('/api/wallet/topup', requireAuth, (req: AuthedRequest, res) => {
   });
 });
 
+const CHECKIN_REWARD_SCHEDULE = [
+  { day: 1, points: 10, bonusVi: '', bonusEn: '' },
+  { day: 2, points: 15, bonusVi: '', bonusEn: '' },
+  { day: 3, points: 40, bonusVi: 'Bonus chuỗi 3 ngày liên tục!', bonusEn: '3-Day Streak Bonus!' },
+  { day: 4, points: 20, bonusVi: '', bonusEn: '' },
+  { day: 5, points: 25, bonusVi: '', bonusEn: '' },
+  { day: 6, points: 30, bonusVi: '', bonusEn: '' },
+  { day: 7, points: 100, bonusVi: 'Quà VIP 7 ngày: +100 điểm & Voucher ROAR7DAY (-15%)', bonusEn: '7-Day VIP Gift: +100 pts & Voucher ROAR7DAY (15% OFF)' },
+];
+
+function getVietnamDateStr(offsetDays = 0): string {
+  const now = new Date(Date.now() + offsetDays * 86400000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(now);
+}
+
+app.get('/api/checkin/status', requireAuth, (req: AuthedRequest, res) => {
+  const userId = req.authUser!.userId;
+  const today = getVietnamDateStr(0);
+  const yesterday = getVietnamDateStr(-1);
+  const rows = db
+    .prepare('SELECT checkin_date, streak_day, points_awarded, bonus_reward FROM daily_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 14')
+    .all(userId) as any[];
+
+  const latest = rows[0];
+  const checkedInToday = latest?.checkin_date === today;
+  let currentStreak = 0;
+  if (latest?.checkin_date === today || latest?.checkin_date === yesterday) {
+    currentStreak = Number(latest.streak_day || 0);
+  }
+  const totalCheckins = (db.prepare('SELECT COUNT(*) as c FROM daily_checkins WHERE user_id = ?').get(userId) as { c: number }).c;
+  const nextCycleDay = (currentStreak % 7) + 1;
+
+  res.json({
+    today,
+    checkedInToday,
+    currentStreak,
+    nextCycleDay,
+    totalCheckins,
+    schedule: CHECKIN_REWARD_SCHEDULE,
+    history: rows,
+  });
+});
+
+app.post('/api/checkin', requireAuth, (req: AuthedRequest, res) => {
+  const userId = req.authUser!.userId;
+  const today = getVietnamDateStr(0);
+  const yesterday = getVietnamDateStr(-1);
+
+  const existing = db.prepare('SELECT id FROM daily_checkins WHERE user_id = ? AND checkin_date = ?').get(userId, today);
+  if (existing) {
+    res.status(400).json({ error: 'Bạn đã điểm danh hôm nay rồi! Hẹn gặp bạn vào ngày mai nhé.' });
+    return;
+  }
+
+  const prev = db.prepare('SELECT streak_day FROM daily_checkins WHERE user_id = ? AND checkin_date = ?').get(userId, yesterday) as any;
+  const newStreak = prev ? Number(prev.streak_day || 0) + 1 : 1;
+  const cycleDay = ((newStreak - 1) % 7) + 1;
+  const rule = CHECKIN_REWARD_SCHEDULE[cycleDay - 1] || CHECKIN_REWARD_SCHEDULE[0];
+
+  db.prepare(`
+    INSERT INTO daily_checkins (user_id, checkin_date, streak_day, points_awarded, bonus_reward)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(userId, today, newStreak, rule.points, rule.bonusVi);
+
+  db.prepare(`
+    INSERT INTO points_ledger (user_id, order_id, entry_type, points, description_vi, description_en, expires_at)
+    VALUES (?, NULL, 'earn_available', ?, ?, ?, datetime('now', '+365 days'))
+  `).run(
+    userId,
+    rule.points,
+    `Điểm danh ngày ${newStreak}${rule.bonusVi ? ` · ${rule.bonusVi}` : ''}`,
+    `Daily Check-in Day ${newStreak}${rule.bonusEn ? ` · ${rule.bonusEn}` : ''}`
+  );
+
+  res.json({
+    ok: true,
+    checkinDate: today,
+    streakDay: newStreak,
+    cycleDay,
+    pointsAwarded: rule.points,
+    bonusVi: rule.bonusVi,
+    bonusEn: rule.bonusEn,
+    points: getPointsSummary(userId),
+  });
+});
+
 app.get('/api/admin/wallets', requirePermission('promotions'), (_req, res) => {
   const members = db
     .prepare(

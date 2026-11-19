@@ -1394,6 +1394,18 @@ function seedInitialData(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS daily_checkins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      checkin_date TEXT NOT NULL,
+      streak_day INTEGER NOT NULL DEFAULT 1,
+      points_awarded INTEGER NOT NULL DEFAULT 10,
+      bonus_reward TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, checkin_date),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   // Idempotent Gift Voucher products (50k, 100k, 500k, 1,000,000 VND)
